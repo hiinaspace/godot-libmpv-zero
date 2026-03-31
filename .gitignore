@@ -60,5 +60,10 @@ compile_commands.json
 # Cmake
 cmake-build*
 CMakeUserPresets.json
+build-phase0/
+
+# Local top-level build outputs
+bin/windows/*
+!bin/windows/.gitkeep
 
 .claude
