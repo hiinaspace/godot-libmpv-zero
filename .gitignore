@@ -60,3 +60,5 @@ compile_commands.json
 # Cmake
 cmake-build*
 CMakeUserPresets.json
+
+.claude
