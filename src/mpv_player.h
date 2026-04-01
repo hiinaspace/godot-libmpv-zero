@@ -68,6 +68,7 @@ public:
 	int get_audio_channel_count() const;
 	Ref<AudioStream> get_audio_stream_for_channel(int p_channel_index) const;
 	void attach_audio_playback(int p_channel_index, const Ref<AudioStreamGeneratorPlayback> &p_playback);
+	Dictionary get_audio_diagnostics() const;
 	String get_video_status() const;
 	String get_mpv_status() const;
 	void set_video_backend(int p_backend);

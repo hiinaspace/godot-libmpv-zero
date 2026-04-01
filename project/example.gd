@@ -41,7 +41,14 @@ func _process(delta: float) -> void:
 	if _status_timer < 1.0:
 		return
 	_status_timer = 0.0
+	var audio_diag: Dictionary = _player.get_audio_diagnostics()
 	print("example.gd video status: %s" % _player.get_video_status())
+	print("example.gd audio diag: channels=%d queued=%d max=%d underruns=%d" % [
+		int(audio_diag.get("channel_count", 0)),
+		int(audio_diag.get("total_queued_frames", 0)),
+		int(audio_diag.get("max_queued_frames", 0)),
+		int(audio_diag.get("underrun_count", 0)),
+	])
 
 
 func _create_world() -> void:

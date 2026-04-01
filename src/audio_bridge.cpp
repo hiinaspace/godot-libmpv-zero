@@ -14,6 +14,7 @@ void AudioBridge::reset() {
 	channels.clear();
 	sample_rate = 48000;
 	configuration_changed = true;
+	underrun_count = 0;
 }
 
 void AudioBridge::reconfigure_locked(int p_channel_count, int p_sample_rate) {
@@ -62,8 +63,12 @@ void AudioBridge::flush_to_playbacks() {
 		}
 
 		const int frames_available = channel.playback->get_frames_available();
-		const int frames_to_push = std::min(frames_available, static_cast<int>(channel.queued_samples.size()));
+		const int queued_frames = static_cast<int>(channel.queued_samples.size());
+		const int frames_to_push = std::min(frames_available, queued_frames);
 		if (frames_to_push <= 0) {
+			if (frames_available > 0 && queued_frames == 0) {
+				underrun_count += 1;
+			}
 			continue;
 		}
 
@@ -77,6 +82,22 @@ void AudioBridge::flush_to_playbacks() {
 
 		channel.playback->push_buffer(frames);
 	}
+}
+
+AudioBridge::Diagnostics AudioBridge::get_diagnostics() const {
+	std::lock_guard<std::mutex> lock(mutex);
+
+	Diagnostics diagnostics;
+	diagnostics.sample_rate = sample_rate;
+	diagnostics.channel_count = static_cast<int>(channels.size());
+	diagnostics.underrun_count = underrun_count;
+	for (const ChannelState &channel : channels) {
+		const int queued_frames = static_cast<int>(channel.queued_samples.size());
+		diagnostics.total_queued_frames += queued_frames;
+		diagnostics.max_queued_frames = std::max(diagnostics.max_queued_frames, queued_frames);
+	}
+
+	return diagnostics;
 }
 
 bool AudioBridge::consume_configuration_changed() {

@@ -36,6 +36,7 @@ void MPVPlayer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_audio_channel_count"), &MPVPlayer::get_audio_channel_count);
 	ClassDB::bind_method(D_METHOD("get_audio_stream_for_channel", "channel_index"), &MPVPlayer::get_audio_stream_for_channel);
 	ClassDB::bind_method(D_METHOD("attach_audio_playback", "channel_index", "playback"), &MPVPlayer::attach_audio_playback);
+	ClassDB::bind_method(D_METHOD("get_audio_diagnostics"), &MPVPlayer::get_audio_diagnostics);
 	ClassDB::bind_method(D_METHOD("get_video_status"), &MPVPlayer::get_video_status);
 	ClassDB::bind_method(D_METHOD("get_mpv_status"), &MPVPlayer::get_mpv_status);
 	ClassDB::bind_method(D_METHOD("set_video_backend", "backend"), &MPVPlayer::set_video_backend);
@@ -132,6 +133,18 @@ Ref<AudioStream> MPVPlayer::get_audio_stream_for_channel(int p_channel_index) co
 
 void MPVPlayer::attach_audio_playback(int p_channel_index, const Ref<AudioStreamGeneratorPlayback> &p_playback) {
 	audio_bridge->set_channel_playback(p_channel_index, p_playback);
+}
+
+Dictionary MPVPlayer::get_audio_diagnostics() const {
+	const libmpv_zero::AudioBridge::Diagnostics diagnostics = audio_bridge->get_diagnostics();
+
+	Dictionary result;
+	result["sample_rate"] = diagnostics.sample_rate;
+	result["channel_count"] = diagnostics.channel_count;
+	result["max_queued_frames"] = diagnostics.max_queued_frames;
+	result["total_queued_frames"] = diagnostics.total_queued_frames;
+	result["underrun_count"] = diagnostics.underrun_count;
+	return result;
 }
 
 String MPVPlayer::get_video_status() const {
