@@ -30,6 +30,9 @@ private:
 	void _on_video_texture_ready(const Ref<Texture2D> &p_texture);
 	void _on_video_probe_failed(const String &p_reason);
 	void _sync_mpv_state();
+	void _configure_mpv_core_for_backend();
+	bool _initialize_runtime();
+	void _shutdown_runtime();
 	void _recreate_video_output_backend();
 
 	std::unique_ptr<libmpv_zero::MpvCore> mpv_core;

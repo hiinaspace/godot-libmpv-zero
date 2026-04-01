@@ -182,7 +182,8 @@ bool MpvCore::initialize() {
 	dispatch.set_option_string(handle, "msg-level", "all=status");
 	dispatch.set_option_string(handle, "idle", "yes");
 	dispatch.set_option_string(handle, "keep-open", "yes");
-	dispatch.set_option_string(handle, "vo", "libmpv");
+	const char *video_output_name = video_output_mode == VideoOutputMode::LIBMPV ? "libmpv" : "null";
+	dispatch.set_option_string(handle, "vo", video_output_name);
 	dispatch.set_option_string(handle, "ao", "null");
 	dispatch.set_option_string(handle, "pause", "yes");
 
@@ -306,6 +307,14 @@ void MpvCore::seek(double p_seconds) {
 		return;
 	}
 	status = "seek issued";
+}
+
+void MpvCore::set_video_output_mode(VideoOutputMode p_mode) {
+	if (initialized) {
+		return;
+	}
+
+	video_output_mode = p_mode;
 }
 
 MpvCore::PollResult MpvCore::poll() {
@@ -455,6 +464,10 @@ void *MpvCore::get_native_handle() const {
 
 bool MpvCore::has_loaded_file() const {
 	return file_loaded;
+}
+
+MpvCore::VideoOutputMode MpvCore::get_video_output_mode() const {
+	return video_output_mode;
 }
 
 } // namespace libmpv_zero

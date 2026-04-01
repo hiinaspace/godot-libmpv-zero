@@ -6,6 +6,11 @@ namespace libmpv_zero {
 
 class MpvCore {
 public:
+	enum class VideoOutputMode {
+		LIBMPV,
+		NULL_OUTPUT,
+	};
+
 	struct PollResult {
 		bool file_loaded = false;
 		bool playback_finished = false;
@@ -28,6 +33,7 @@ public:
 	void pause();
 	void stop();
 	void seek(double p_seconds);
+	void set_video_output_mode(VideoOutputMode p_mode);
 	bool initialize();
 	void shutdown();
 	PollResult poll();
@@ -43,6 +49,7 @@ public:
 	bool is_initialized() const;
 	void *get_native_handle() const;
 	bool has_loaded_file() const;
+	VideoOutputMode get_video_output_mode() const;
 
 private:
 	bool initialized = false;
@@ -54,6 +61,7 @@ private:
 	bool file_loaded = false;
 	int video_width = 0;
 	int video_height = 0;
+	VideoOutputMode video_output_mode = VideoOutputMode::LIBMPV;
 };
 
 } // namespace libmpv_zero

@@ -56,19 +56,7 @@ void MPVPlayer::_ready() {
 	audio_bridge->configure_stereo_channels();
 	emit_signal("audio_channels_changed", audio_bridge->get_audio_channel_count());
 
-	if (!mpv_core->initialize()) {
-		UtilityFunctions::push_warning("MPVPlayer: " + mpv_core->get_status());
-	}
-	UtilityFunctions::print("MPVPlayer: ", mpv_core->get_status());
-
-	if (video_output_backend) {
-		video_output_backend->attach(
-				this,
-				mpv_core.get(),
-				callable_mp(this, &MPVPlayer::_on_video_texture_ready),
-				callable_mp(this, &MPVPlayer::_on_video_probe_failed));
-		video_status = video_output_backend->get_status();
-	}
+	_initialize_runtime();
 	set_process(true);
 }
 
@@ -78,12 +66,7 @@ void MPVPlayer::_process(double /*p_delta*/) {
 
 void MPVPlayer::_exit_tree() {
 	set_process(false);
-	if (video_output_backend) {
-		video_output_backend->detach();
-	}
-	if (mpv_core) {
-		mpv_core->shutdown();
-	}
+	_shutdown_runtime();
 	video_texture.unref();
 }
 
@@ -153,23 +136,21 @@ void MPVPlayer::set_video_backend(int p_backend) {
 		return;
 	}
 
-	if (is_inside_tree() && video_output_backend) {
-		video_output_backend->detach();
-	}
-
 	video_backend = new_backend;
 	video_texture.unref();
 	last_video_width = 0;
 	last_video_height = 0;
-	_recreate_video_output_backend();
+	last_known_duration = 0.0;
 
-	if (is_inside_tree() && video_output_backend) {
-		video_output_backend->attach(
-				this,
-				mpv_core.get(),
-				callable_mp(this, &MPVPlayer::_on_video_texture_ready),
-				callable_mp(this, &MPVPlayer::_on_video_probe_failed));
-		video_status = video_output_backend->get_status();
+	if (is_inside_tree()) {
+		_shutdown_runtime();
+	}
+
+	_recreate_video_output_backend();
+	_configure_mpv_core_for_backend();
+
+	if (is_inside_tree()) {
+		_initialize_runtime();
 	}
 }
 
@@ -240,6 +221,47 @@ void MPVPlayer::_sync_mpv_state() {
 
 	if (poll_result.failed) {
 		UtilityFunctions::push_warning("MPVPlayer: " + poll_result.status);
+	}
+}
+
+void MPVPlayer::_configure_mpv_core_for_backend() {
+	if (!mpv_core) {
+		return;
+	}
+
+	const libmpv_zero::MpvCore::VideoOutputMode output_mode =
+			video_backend == VIDEO_BACKEND_VULKAN ? libmpv_zero::MpvCore::VideoOutputMode::NULL_OUTPUT : libmpv_zero::MpvCore::VideoOutputMode::LIBMPV;
+	mpv_core->set_video_output_mode(output_mode);
+}
+
+bool MPVPlayer::_initialize_runtime() {
+	_configure_mpv_core_for_backend();
+
+	if (!mpv_core->initialize()) {
+		UtilityFunctions::push_warning("MPVPlayer: " + mpv_core->get_status());
+		return false;
+	}
+
+	UtilityFunctions::print("MPVPlayer: ", mpv_core->get_status());
+
+	if (video_output_backend) {
+		video_output_backend->attach(
+				this,
+				mpv_core.get(),
+				callable_mp(this, &MPVPlayer::_on_video_texture_ready),
+				callable_mp(this, &MPVPlayer::_on_video_probe_failed));
+		video_status = video_output_backend->get_status();
+	}
+
+	return true;
+}
+
+void MPVPlayer::_shutdown_runtime() {
+	if (video_output_backend) {
+		video_output_backend->detach();
+	}
+	if (mpv_core) {
+		mpv_core->shutdown();
 	}
 }
 
