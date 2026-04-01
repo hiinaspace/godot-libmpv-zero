@@ -182,7 +182,7 @@ bool MpvCore::initialize() {
 	dispatch.set_option_string(handle, "msg-level", "all=status");
 	dispatch.set_option_string(handle, "idle", "yes");
 	dispatch.set_option_string(handle, "keep-open", "yes");
-	dispatch.set_option_string(handle, "vo", "null");
+	dispatch.set_option_string(handle, "vo", "libmpv");
 	dispatch.set_option_string(handle, "ao", "null");
 	dispatch.set_option_string(handle, "pause", "yes");
 

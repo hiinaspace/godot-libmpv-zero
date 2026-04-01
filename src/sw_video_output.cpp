@@ -125,6 +125,7 @@ void SwVideoOutput::attach(Node * /*p_owner*/, MpvCore *p_mpv_core, const Callab
 	probe_failed_callback = p_probe_failed;
 	texture_ready_emitted = false;
 	status = "software video backend attached";
+	_ensure_render_context();
 }
 
 void SwVideoOutput::detach() {
