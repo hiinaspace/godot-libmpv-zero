@@ -111,13 +111,17 @@ bool load_mpv_dispatch(String &r_error) {
 	}
 
 	String dll_path = ProjectSettings::get_singleton()->globalize_path("res://bin/windows/libmpv-2.dll");
+	String dll_dir = dll_path.get_base_dir();
+	const Char16String dll_dir_utf16 = dll_dir.utf16();
 	const Char16String dll_path_utf16 = dll_path.utf16();
+	SetDllDirectoryW(reinterpret_cast<LPCWSTR>(dll_dir_utf16.get_data()));
 	dispatch.library = LoadLibraryW(reinterpret_cast<LPCWSTR>(dll_path_utf16.get_data()));
 	if (!dispatch.library) {
 		dispatch.library = LoadLibraryW(L"libmpv-2.dll");
 	}
 	if (!dispatch.library) {
-		r_error = "failed to load libmpv-2.dll";
+		const DWORD error_code = GetLastError();
+		r_error = vformat("failed to load libmpv-2.dll (Win32 error %d)", static_cast<int>(error_code));
 		return false;
 	}
 

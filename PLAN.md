@@ -396,17 +396,159 @@ src/
 - Keep CMake as the primary build system
 - rename the template artifacts early so the repo stops looking like scaffolding
 
+## mpv fork scope
+
+The fork needs to add two things that do not exist in upstream mpv:
+
+### 1. Custom pull-based AO driver
+
+mpv's internal `ao_driver` interface has both push and pull modes. Pull-based AOs call
+`ao_read_data()` when they are ready for samples. A new `ao_godot.c` driver would:
+
+- operate in pull mode (implement `init`, `start`, `reset`, `uninit`)
+- on `start()`, store a user-provided callback and begin calling it on a timer or
+  dedicated thread whenever a new audio period is available
+- use `ao_read_data()` to fill the period buffer, then hand decoded PCM to the callback
+
+The callback setter must be exposed through the public libmpv API. The cleanest mechanism
+is a new `mpv_set_option_string` key (e.g. `ao=godot`) combined with a new
+`mpv_set_godot_audio_callback(mpv_handle *, callback_fn, void *userdata)` entry point
+added to the libmpv shared library and declared in an extension header.
+
+The existing `ao_pcm.c` (writes decoded PCM to file) and `ao_openal.c` (pull-based via
+OpenAL callback) are the closest reference implementations inside the mpv tree.
+
+### 2. Vulkan libmpv render backend (Phase 2)
+
+mpv currently exposes two render backends through the libmpv render API:
+- `MPV_RENDER_API_TYPE_OPENGL` — implemented in `video/out/gpu/libmpv_gpu.c`
+- `MPV_RENDER_API_TYPE_SW` — implemented in `video/out/libmpv_sw.c`
+
+The `render_backend_fns` interface in `video/out/libmpv.h` is the extension point.
+A new Vulkan backend would:
+
+- register under a new `MPV_RENDER_API_TYPE_VULKAN` string (defined in a new
+  `include/mpv/render_vk.h` header similar to `render_gl.h`)
+- accept an externally provided `VkInstance`, `VkPhysicalDevice`, `VkDevice`, and queue
+  family index at init time — these come from Godot's rendering device
+- use libplacebo's `pl_vulkan_import()` to create a `pl_gpu` context on that device
+  (libplacebo already supports device import; this is how the gpu_next VO works internally)
+- implement `render()` by accepting a `VkImage` target and layout, rendering a frame
+  into it, and returning a `VkSemaphore` or fence the caller can wait on before sampling
+- implement `get_image()` to optionally allocate from the external device's allocator
+
+This is the most substantial fork work. The gpu_next VO (`video/out/gpu_next/`) and
+the libplacebo Vulkan context (`video/out/vulkan/`) are the reference implementation.
+libplacebo's `pl_vulkan_import` path is already tested in production (e.g. by
+external GPU-compute integrations); the main new surface is the libmpv API wrapper.
+
 ## mpv dependency
 
-### Windows MVP
+### Local development build (Windows, MSYS2)
 
-- build against a pinned custom mpv fork
-- publish Windows build artifacts from GitHub Actions
-- consume those artifacts in plugin CI and release packaging
+MSYS2 is the most practical local build environment on Windows. mpv's own CI uses
+this path and documents it in `DOCS/compile-windows.md`.
+
+Minimal build for plugin development (`MSYS2 CLANG64` shell, or `bash` with `/clang64/bin` on `PATH`):
+
+```bash
+# Install base tools in MSYS2
+pacman -S --needed base-devel git
+# Install CLANG64 toolchain and dependencies
+pacboy -S --needed python pkgconf cc meson ffmpeg libjpeg-turbo libplacebo luajit vulkan-headers nasm yasm cmake
+```
+
+Then in the mpv fork checkout:
+
+```bash
+meson setup build \
+  -Dlibmpv=true \
+  -Dcplayer=false \
+  -Dvulkan=enabled \
+  -Dgl=disabled \
+  -Dd3d11=disabled \
+  --prefix=$(pwd)/install
+
+ninja -C build
+ninja -C build install
+```
+
+This produces `install/bin/libmpv-2.dll` and `install/lib/libmpv.dll.a` plus headers.
+The `--prefix` layout matches what the plugin's CMake already expects for the local dev
+dependency path.
+
+The `ci/build-win32.ps1` script in mpv's own repo shows an alternative native Windows SDK
+build using Clang and Meson subprojects (no MSYS2 required), which may be useful for
+CI environments where MSYS2 is inconvenient.
+
+### CI artifacts (forked mpv-winbuild-cmake)
+
+[shinchiro/mpv-winbuild-cmake](https://github.com/shinchiro/mpv-winbuild-cmake) is the
+canonical approach for producing fully-featured, redistributable Windows mpv binaries.
+It is a CMake ExternalProject system that cross-compiles the full dependency tree
+(ffmpeg, libplacebo, shaderc, spirv-cross, vulkan, etc.) from Linux using a
+MinGW-w64 toolchain it bootstraps itself.
+
+**How to point it at our fork:**
+
+The mpv package is defined in `packages/mpv.cmake`. The only required change is:
+
+```cmake
+GIT_REPOSITORY https://github.com/our-org/mpv.git   # was mpv-player/mpv.git
+GIT_TAG        our-branch-or-commit-hash
+```
+
+The full dependency graph (libplacebo, shaderc, vulkan, ffmpeg, etc.) is already
+defined and working. Adding `GIT_TAG` pins the build to a specific commit so CI
+artifacts are reproducible.
+
+**Fork and workflow strategy:**
+
+1. Fork `mpv-winbuild-cmake` into our org.
+2. Change `packages/mpv.cmake` GIT_REPOSITORY and add a pinned GIT_TAG.
+3. Add a GitHub Actions workflow (`.github/workflows/build.yml`) that:
+   - runs on `ubuntu-latest`
+   - installs the prerequisites listed in the README (ninja, cmake, meson, nasm, etc.)
+   - runs `cmake -DTARGET_ARCH=x86_64-w64-mingw32 -G Ninja -B build64 .`
+   - runs `ninja gcc` once to build the toolchain (cache this layer aggressively)
+   - runs `ninja mpv` to produce artifacts
+   - uploads `mpv-dev-x86_64-*` (contains `libmpv-2.dll`, `libmpv.dll.a`, headers)
+     as a versioned release artifact
+
+The toolchain bootstrap (`ninja gcc`) takes ~20 minutes and should be cached between
+runs using the Actions cache keyed on the toolchain commit. Once cached, incremental
+`ninja mpv` builds are fast.
+
+**Artifact layout produced by mpv-winbuild-cmake:**
+
+```
+mpv-dev-x86_64-YYYYMMDD/
+  libmpv-2.dll
+  libmpv.dll.a
+  include/
+    mpv/client.h
+    mpv/render.h
+    mpv/render_gl.h
+    mpv/stream_cb.h
+```
+
+We need to also copy our extension headers (`render_vk.h`, `godot_audio.h`) in the
+`copy-binary` step.
+
+**Plugin CI consumption:**
+
+The plugin's CMake finds these artifacts via `MPV_DIR` pointing at the extracted
+artifact directory. This is already the pattern used for the local dev build.
+In CI, a workflow step downloads and extracts the pinned mpv-dev artifact before
+the plugin build runs.
 
 ### Linux later
 
-Linux support should be postponed until the Windows path is stable. When added, Linux should also target the same pinned fork model rather than relying on unknown system `libmpv` behavior if fork patches are required.
+Linux support should be postponed until the Windows path is stable. When added, Linux
+should also target the same pinned fork model. mpv-winbuild-cmake itself runs on any
+Linux host and supports `aarch64-w64-mingw32` as a third target arch if needed. For
+native Linux libmpv builds, distro packages or meson subproject builds are viable since
+the dependency management problem is simpler than Windows.
 
 ## Risks
 
@@ -459,3 +601,4 @@ Linux support should be postponed until the Windows path is stable. When added, 
 2. Build the smallest possible Phase 0 render-thread/Vulkan texture interop spike.
 3. Decide the minimum mpv fork layout and CI artifact strategy before significant player code is written.
 4. After Phase 0 succeeds, implement the minimal backend-separated player shell and audio channel routing path.
+
