@@ -35,10 +35,14 @@ public:
 	const godot::String &get_loaded_path() const;
 	double get_time_pos() const;
 	double get_duration() const;
+	int get_video_width() const;
+	int get_video_height() const;
 	bool is_playing() const;
 	PlaybackState get_playback_state() const;
 	const godot::String &get_status() const;
 	bool is_initialized() const;
+	void *get_native_handle() const;
+	bool has_loaded_file() const;
 
 private:
 	bool initialized = false;
@@ -48,6 +52,8 @@ private:
 	godot::String status = "mpv not initialized";
 	PlaybackState playback_state = PlaybackState::STOPPED;
 	bool file_loaded = false;
+	int video_width = 0;
+	int video_height = 0;
 };
 
 } // namespace libmpv_zero

@@ -2,8 +2,8 @@
 
 #include "audio_bridge.h"
 #include "mpv_core.h"
+#include "sw_video_output.h"
 #include "video_output_backend.h"
-#include "vk_video_output.h"
 
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/callable_method_pointer.hpp>
@@ -14,7 +14,7 @@ using namespace godot;
 MPVPlayer::MPVPlayer() :
 		mpv_core(std::make_unique<libmpv_zero::MpvCore>()),
 		audio_bridge(std::make_unique<libmpv_zero::AudioBridge>()),
-		video_output_backend(std::make_unique<libmpv_zero::VkVideoOutput>()) {
+		video_output_backend(std::make_unique<libmpv_zero::SwVideoOutput>()) {
 }
 
 MPVPlayer::~MPVPlayer() = default;
@@ -56,6 +56,7 @@ void MPVPlayer::_ready() {
 
 	video_output_backend->attach(
 			this,
+			mpv_core.get(),
 			callable_mp(this, &MPVPlayer::_on_video_texture_ready),
 			callable_mp(this, &MPVPlayer::_on_video_probe_failed));
 	video_status = video_output_backend->get_status();
@@ -68,11 +69,11 @@ void MPVPlayer::_process(double /*p_delta*/) {
 
 void MPVPlayer::_exit_tree() {
 	set_process(false);
-	if (mpv_core) {
-		mpv_core->shutdown();
-	}
 	if (video_output_backend) {
 		video_output_backend->detach();
+	}
+	if (mpv_core) {
+		mpv_core->shutdown();
 	}
 	video_texture.unref();
 }
@@ -140,7 +141,22 @@ String MPVPlayer::get_mpv_status() const {
 void MPVPlayer::_on_video_texture_ready(const Ref<Texture2D> &p_texture) {
 	video_texture = p_texture;
 	video_status = "texture ready";
-	emit_signal("video_size_changed", 256, 256);
+
+	int width = 0;
+	int height = 0;
+	if (mpv_core) {
+		width = mpv_core->get_video_width();
+		height = mpv_core->get_video_height();
+	}
+	if ((width <= 0 || height <= 0) && p_texture.is_valid()) {
+		width = p_texture->get_width();
+		height = p_texture->get_height();
+	}
+	if (width > 0 && height > 0) {
+		last_video_width = width;
+		last_video_height = height;
+		emit_signal("video_size_changed", width, height);
+	}
 }
 
 void MPVPlayer::_on_video_probe_failed(const String &p_reason) {
@@ -154,6 +170,10 @@ void MPVPlayer::_sync_mpv_state() {
 	}
 
 	const libmpv_zero::MpvCore::PollResult poll_result = mpv_core->poll();
+	if (video_output_backend) {
+		video_output_backend->update();
+		video_status = video_output_backend->get_status();
+	}
 
 	if (poll_result.file_loaded) {
 		emit_signal("file_loaded");
@@ -163,6 +183,15 @@ void MPVPlayer::_sync_mpv_state() {
 	}
 	if (poll_result.playback_finished) {
 		emit_signal("playback_finished");
+	}
+	if (poll_result.video_reconfigured || poll_result.file_loaded) {
+		const int width = mpv_core->get_video_width();
+		const int height = mpv_core->get_video_height();
+		if (width > 0 && height > 0 && (width != last_video_width || height != last_video_height)) {
+			last_video_width = width;
+			last_video_height = height;
+			emit_signal("video_size_changed", width, height);
+		}
 	}
 
 	const double duration = mpv_core->get_duration();

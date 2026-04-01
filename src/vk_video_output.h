@@ -10,8 +10,9 @@ namespace libmpv_zero {
 
 class VkVideoOutput : public VideoOutputBackend {
 public:
-	void attach(godot::Node *p_owner, const godot::Callable &p_texture_ready, const godot::Callable &p_probe_failed) override;
+	void attach(godot::Node *p_owner, MpvCore *p_mpv_core, const godot::Callable &p_texture_ready, const godot::Callable &p_probe_failed) override;
 	void detach() override;
+	void update() override;
 	godot::Ref<godot::Texture2D> get_texture() const override;
 	godot::String get_status() const override;
 

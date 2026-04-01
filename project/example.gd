@@ -6,10 +6,18 @@ func _ready() -> void:
 	status_label.text = "Waiting for MPVPlayer..."
 	status_label.position = Vector2(16, 16)
 	add_child(status_label)
+
 	var mpv_status_label := Label.new()
 	mpv_status_label.text = "mpv: not initialized"
 	mpv_status_label.position = Vector2(16, 32)
 	add_child(mpv_status_label)
+
+	var rect := TextureRect.new()
+	rect.position = Vector2(16, 64)
+	rect.custom_minimum_size = Vector2(256, 256)
+	rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	rect.stretch_mode = TextureRect.STRETCH_SCALE
+	add_child(rect)
 
 	var player := MPVPlayer.new()
 	add_child(player)
@@ -21,16 +29,11 @@ func _ready() -> void:
 		mpv_status_label.text = "mpv: %s" % player.get_mpv_status()
 	)
 
-	player.video_size_changed.connect(func(_width: int, _height: int) -> void:
-		status_label.text = "Video texture ready"
+	player.video_size_changed.connect(func(width: int, height: int) -> void:
+		status_label.text = "Video texture ready: %dx%d" % [width, height]
 		mpv_status_label.text = "mpv: %s" % player.get_mpv_status()
-		var rect := TextureRect.new()
+		print("example.gd video_size_changed: %dx%d" % [width, height])
 		rect.texture = player.get_texture()
-		rect.position = Vector2(16, 64)
-		rect.custom_minimum_size = Vector2(256, 256)
-		rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		rect.stretch_mode = TextureRect.STRETCH_SCALE
-		add_child(rect)
 	)
 
 	player.file_loaded.connect(func() -> void:
@@ -45,7 +48,7 @@ func _ready() -> void:
 		print("example.gd playback_finished signal")
 	)
 
-	var smoke_test_path := ProjectSettings.globalize_path("res://smoke_test.ppm")
+	var smoke_test_path := ProjectSettings.globalize_path("res://smoke_test.mp4")
 	player.load_file(smoke_test_path)
 	player.play()
 	print("example.gd load_file issued: %s" % smoke_test_path)

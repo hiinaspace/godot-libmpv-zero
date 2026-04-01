@@ -8,7 +8,7 @@ using namespace godot;
 
 namespace libmpv_zero {
 
-void VkVideoOutput::attach(Node *p_owner, const Callable &p_texture_ready, const Callable &p_probe_failed) {
+void VkVideoOutput::attach(Node *p_owner, MpvCore * /*p_mpv_core*/, const Callable &p_texture_ready, const Callable &p_probe_failed) {
 	if (probe) {
 		return;
 	}
@@ -20,6 +20,9 @@ void VkVideoOutput::attach(Node *p_owner, const Callable &p_texture_ready, const
 	probe->connect("texture_ready", p_texture_ready);
 	probe->connect("probe_failed", p_probe_failed);
 	status = "vulkan probe attached";
+}
+
+void VkVideoOutput::update() {
 }
 
 void VkVideoOutput::detach() {

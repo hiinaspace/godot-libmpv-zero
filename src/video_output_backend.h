@@ -7,12 +7,15 @@
 
 namespace libmpv_zero {
 
+class MpvCore;
+
 class VideoOutputBackend {
 public:
 	virtual ~VideoOutputBackend() = default;
 
-	virtual void attach(godot::Node *p_owner, const godot::Callable &p_texture_ready, const godot::Callable &p_probe_failed) = 0;
+	virtual void attach(godot::Node *p_owner, MpvCore *p_mpv_core, const godot::Callable &p_texture_ready, const godot::Callable &p_probe_failed) = 0;
 	virtual void detach() = 0;
+	virtual void update() = 0;
 	virtual godot::Ref<godot::Texture2D> get_texture() const = 0;
 	virtual godot::String get_status() const = 0;
 };

@@ -87,6 +87,22 @@ bool get_mpv_flag_property(const char *p_name, bool &r_value) {
 	return false;
 }
 
+bool get_mpv_int64_property(const char *p_name, int64_t &r_value) {
+	MpvDispatch &dispatch = get_dispatch();
+	mpv_handle *handle = get_handle();
+	if (!dispatch.get_property || !handle) {
+		return false;
+	}
+
+	int64_t value = 0;
+	if (dispatch.get_property(handle, p_name, MPV_FORMAT_INT64, &value) >= 0) {
+		r_value = value;
+		return true;
+	}
+
+	return false;
+}
+
 bool load_mpv_dispatch(String &r_error) {
 #ifdef _WIN32
 	MpvDispatch &dispatch = get_dispatch();
@@ -197,6 +213,8 @@ void MpvCore::shutdown() {
 	loaded_path = "";
 	time_pos = 0.0;
 	duration = 0.0;
+	video_width = 0;
+	video_height = 0;
 	unload_mpv_dispatch();
 	status = "mpv shut down";
 }
@@ -210,6 +228,8 @@ void MpvCore::load_file(const String &p_path) {
 	loaded_path = p_path;
 	time_pos = 0.0;
 	duration = 0.0;
+	video_width = 0;
+	video_height = 0;
 	playback_state = PlaybackState::STOPPED;
 	file_loaded = false;
 	status = "loading file";
@@ -315,6 +335,8 @@ MpvCore::PollResult MpvCore::poll() {
 				playback_state = PlaybackState::STOPPED;
 				file_loaded = false;
 				time_pos = 0.0;
+				video_width = 0;
+				video_height = 0;
 				const mpv_event_end_file *end_file = static_cast<const mpv_event_end_file *>(event->data);
 				if (end_file && end_file->reason == MPV_END_FILE_REASON_ERROR) {
 					status = "playback ended with error: " + format_mpv_error(end_file->error);
@@ -361,6 +383,16 @@ MpvCore::PollResult MpvCore::poll() {
 		duration = new_duration;
 	}
 
+	int64_t new_width = video_width;
+	if (get_mpv_int64_property("width", new_width)) {
+		video_width = static_cast<int>(new_width);
+	}
+
+	int64_t new_height = video_height;
+	if (get_mpv_int64_property("height", new_height)) {
+		video_height = static_cast<int>(new_height);
+	}
+
 	bool paused = playback_state == PlaybackState::PAUSED;
 	if (get_mpv_flag_property("pause", paused)) {
 		const PlaybackState new_state = file_loaded ? (paused ? PlaybackState::PAUSED : PlaybackState::PLAYING) : PlaybackState::STOPPED;
@@ -393,6 +425,14 @@ double MpvCore::get_duration() const {
 	return duration;
 }
 
+int MpvCore::get_video_width() const {
+	return video_width;
+}
+
+int MpvCore::get_video_height() const {
+	return video_height;
+}
+
 bool MpvCore::is_playing() const {
 	return playback_state == PlaybackState::PLAYING;
 }
@@ -407,6 +447,14 @@ const String &MpvCore::get_status() const {
 
 bool MpvCore::is_initialized() const {
 	return initialized;
+}
+
+void *MpvCore::get_native_handle() const {
+	return get_handle();
+}
+
+bool MpvCore::has_loaded_file() const {
+	return file_loaded;
 }
 
 } // namespace libmpv_zero

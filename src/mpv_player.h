@@ -11,7 +11,7 @@ namespace libmpv_zero {
 class AudioBridge;
 class MpvCore;
 class VideoOutputBackend;
-}
+} //namespace libmpv_zero
 
 namespace godot {
 
@@ -30,6 +30,8 @@ class MPVPlayer : public Node {
 	Ref<Texture2D> video_texture;
 	String video_status = "idle";
 	double last_known_duration = 0.0;
+	int last_video_width = 0;
+	int last_video_height = 0;
 
 public:
 	MPVPlayer();
