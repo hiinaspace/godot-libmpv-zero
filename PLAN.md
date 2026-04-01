@@ -73,15 +73,51 @@ The desired VR behavior is not "play audio somehow." The target behavior is clos
 
 That means the audio architecture should not collapse immediately into one mixed `AudioStreamGenerator` unless we intentionally support a simplified mode in addition to speaker routing.
 
-### 5. External upstream work is informative, but not a dependency
+### 5. The current audio bridge proved the concept, but not the production design
 
-There is relevant upstream discussion and draft work around:
+The current prototype successfully proves:
+
+- forked mpv can decode and hand PCM to Godot
+- stereo channels can be exposed as separate Godot-facing streams
+- the sample scene can route those channels to independent 3D emitters
+
+It also revealed the main limitation of the current approach:
+
+- `AudioStreamGeneratorPlayback` driven from plugin-side polling is not a strong long-term sync model
+
+Empirically, the prototype can play, but it still produces audible underruns under otherwise simple conditions. The root cause is architectural, not just "buffer is too small":
+
+- mpv normally syncs around the AO's real playback delay
+- the current `ao_godot` implementation paces itself on a timer thread, not a real device-backed delay model
+- Godot's `AudioStreamGeneratorPlayback` is a ring buffer that zero-fills on underrun, but does not provide a pull-style playback clock to the producer
+- the plugin currently feeds that ring buffer from game/plugin-side update logic, not from the audio mix thread
+
+This means the first audio implementation should now be treated as a diagnostic prototype, not as the final architecture.
+
+### 6. Godot's own video audio path points to the more maintainable direction
+
+Godot's internal `VideoStreamPlayer` does not use `AudioStreamGeneratorPlayback` for its main audio path. Instead, it:
+
+- registers an audio mix callback with `AudioServer`
+- lets `VideoStreamPlayback` provide decoded audio through `mix_audio()`
+- resamples and mixes audio from the engine audio thread
+
+That is materially closer to what we need than the current generator-fed prototype. It suggests the long-term Godot-facing architecture should be pull-based on the audio thread, not push-based from `_process()`.
+
+The `godot-steam-audio` plugin reinforces the same conclusion. Its core path wraps an underlying `AudioStream` in a custom `AudioStreamPlayback`, then applies Steam Audio processing inside `_mix()`. This is much easier to compose with than trying to spatialize a generator buffer from the outside after the fact.
+
+### 7. External upstream work is informative, but not a dependency
+
+There is relevant upstream discussion and scattered issue history around:
 
 - Vulkan support in libmpv render APIs
 - callback-oriented audio extraction from mpv
 - Godot audio buffering behavior
+- GDExtension and audio thread limitations
 
 Those efforts are useful as references and worth monitoring, but this project should proceed as if none of them will land in time to help. Design choices should be based on local feasibility and maintainability, not on expected upstream movement.
+
+As of April 1, 2026, a quick tracker scan did not surface an existing upstream Godot feature that cleanly exposes `AudioServer::add_mix_callback()` to GDExtension, nor an existing upstream mpv libmpv audio callback path that removes the need for our fork work.
 
 ## Revised Architecture
 
@@ -128,14 +164,14 @@ Each video frame slot should track:
 
 ### Goal
 
-Decode audio with mpv but let Godot perform spatial playback.
+Decode audio with mpv but let Godot perform spatial playback through a pull-style engine integration that is compatible with Steam Audio.
 
 ### Core model
 
 1. Capture decoded PCM from mpv through a custom AO or callback-oriented audio path in the local mpv fork
 2. Split decoded frames into logical output channels
-3. Feed those channels into separate Godot audio streams
-4. Let users attach those streams to separate `AudioStreamPlayer3D` nodes representing virtual speakers
+3. Expose those channels through a Godot-native playback object that is consumed from the audio mix thread
+4. Allow those channel streams to feed either plain `AudioStreamPlayer3D` or a Steam Audio-compatible playback wrapper
 
 ### Initial routing target
 
@@ -155,6 +191,37 @@ Rather than exposing one `audio_stream` property only, the plugin should be desi
 
 We can still offer a convenience mixed stream later, but it should not be the only model.
 
+### Preferred integration direction
+
+The intended production direction is:
+
+- mpv fork exposes decoded PCM to the plugin
+- plugin stores decoded PCM in per-channel queues owned by an audio-side playback object
+- Godot consumes those queues from a pull-style playback interface on the mix thread
+
+There are two viable ways to get there:
+
+#### Option A: Engine patch
+
+Patch Godot to expose an audio mix callback or similar pull-style hook to GDExtension. This is the smallest conceptual gap from Godot's own `VideoStreamPlayer` path and would likely be the cleanest long-term solution if accepted locally.
+
+#### Option B: Plugin-owned custom playback type
+
+Implement a custom `AudioStreamPlayback`-style object in the extension, similar in spirit to `godot-steam-audio`, and let that playback pull decoded PCM from plugin-owned queues during `_mix`.
+
+This is likely the best fallback if an engine patch is too invasive or slow to maintain.
+
+### Steam Audio compatibility target
+
+Steam Audio is not a side quest. It changes what "good audio integration" means for this project.
+
+The goal should be that each decoded source channel can be:
+
+- routed to a plain `AudioStreamPlayer3D`, or
+- wrapped in a Steam Audio-compatible playback path for HRTF, occlusion, reflections, or other spatial effects
+
+The existing `godot-steam-audio` plugin already demonstrates a pattern of wrapping a source `AudioStream` inside a custom playback class and doing Steam Audio processing in `_mix()`. That strongly suggests our audio architecture should preserve compatibility with that model instead of locking itself to `AudioStreamGeneratorPlayback`.
+
 ### Sync implications
 
 This path introduces real sync work:
@@ -163,7 +230,14 @@ This path introduces real sync work:
 - Godot owns playback buffering and 3D positioning
 - buffering depth will affect perceived A/V sync
 
-The first implementation should optimize for stable playback over perfect lip sync. Sync instrumentation should be built in early so we can tune buffering with real data instead of guessing.
+The current prototype proved that simply "having a buffer" is not enough. The production path needs:
+
+- a pull-side playback clock or audio-thread consumption point
+- explicit startup buffering policy
+- explicit drain/end-of-playback policy
+- instrumentation for decoded queue depth, mixer-side skips, and perceived A/V offset
+
+The first production audio implementation should optimize for stable playback over perfect lip sync. Sync instrumentation should be built in early so we can tune buffering with real data instead of guessing.
 
 ## Internal API Shape
 
@@ -174,9 +248,9 @@ Preferred shape:
 - `MpvCore`
   - owns mpv instance, event pump, commands, and state
 - `VideoOutputBackend`
-  - abstract interface for SW upload backend and Vulkan backend
+  - abstract interface for Vulkan video backend(s)
 - `AudioBridge`
-  - owns channel extraction, buffering, and Godot audio stream publication
+  - owns channel extraction, buffering, and handoff into the Godot-side pull model
 - `MPVPlayer`
   - thin Godot-facing Node wrapper over the above pieces
 
@@ -213,7 +287,7 @@ A tiny test extension that shows a texture backed by an externally owned Vulkan 
 
 If this fails or becomes much more invasive than expected, the rest of the architecture must change. The main existential risk in this project is not basic mpv initialization or Node API design. It is whether a GDExtension can safely participate in Godot's Vulkan renderer using render-thread-safe external texture interop.
 
-## Phase 1: Minimal Runtime Player With CPU Video And Godot Audio
+## Phase 1: Minimal Runtime Player With Temporary Video And Diagnostic Audio
 
 This phase is intentionally not the final rendering architecture. It exists to prove the non-Vulkan parts of the product while the Vulkan backend is still under development.
 
@@ -247,6 +321,14 @@ Support:
 - stereo source routing to two separate Godot streams
 - enough buffering and diagnostics to identify underruns and sync drift
 - a simple Godot test scene with two world-space speaker nodes
+
+This phase is now complete in spirit, even if the current code still needs cleanup and follow-up. It proved:
+
+- forked mpv audio callback path works
+- stereo routing works
+- diagnostics are useful
+
+It also proved that the generator-fed path should not be treated as the final design.
 
 ### Exit criteria
 
@@ -290,7 +372,44 @@ Expected work areas include:
 - stable playback on a 3D surface in a Windows exported build
 - profiling confirms the CPU-upload path is gone
 
-## Phase 3: Packaging And Build Pipeline
+This phase is also effectively achieved for the current prototype:
+
+- externally owned Vulkan images are wrapped successfully
+- mpv renders into those images
+- Godot samples them in-scene
+
+The remaining video work is cleanup and productization, not existential feasibility.
+
+## Phase 3: Production Audio Path And Steam Audio Compatibility
+
+This is now the next core engineering phase.
+
+### Objective
+
+Replace the diagnostic generator-fed audio bridge with a pull-style audio path that is compatible with stable A/V sync and Steam Audio.
+
+### Decision gate
+
+Choose one of:
+
+- engine patch exposing a usable audio-thread mix callback path to GDExtension
+- plugin-owned custom playback implementation modeled after Godot's `VideoStreamPlayback` / `AudioStreamPlayback` patterns
+
+### Focus areas
+
+- use audio-thread consumption as the timing source
+- preserve per-channel routing
+- make startup/drain deterministic
+- expose enough diagnostics to compare decoded queue depth with mixer-side skips
+- validate that a channel can be wrapped or fed into a Steam Audio-compatible playback path
+
+### Exit criteria
+
+- no audible underruns in the stereo sync sample under normal load
+- end-of-file drains cleanly
+- per-channel routing still works
+- at least one credible Steam Audio integration path is demonstrated
+## Phase 4: Packaging And Build Pipeline
 
 At this point, the product depends on a custom mpv fork. CI must reflect that explicitly.
 
@@ -315,7 +434,7 @@ Automate artifact production for:
 - documented runtime contents
 - exported sample project works using packaged artifacts
 
-## Phase 4: VR Validation And Audio/Sync Tuning
+## Phase 5: VR Validation And Audio/Sync Tuning
 
 ### Objective
 
@@ -326,6 +445,7 @@ Validate the product in the actual intended environment: a VR scene with real re
 - frame pacing impact in VR
 - A/V sync stability under realistic buffering
 - audio channel placement semantics
+- Steam Audio spatialization behavior
 - scene integration ergonomics
 
 ### Exit criteria
@@ -381,11 +501,11 @@ src/
   mpv_player.cpp/h
   mpv_core.cpp/h
   video_output_backend.h
-  sw_video_output.cpp/h
   vk_video_output.cpp/h
   render_thread_service.cpp/h
   audio_bridge.cpp/h
   channel_audio_stream.cpp/h
+  spatial_channel_stream.cpp/h
 ```
 
 ## Build And Dependency Strategy
@@ -400,7 +520,7 @@ src/
 
 The fork needs to add two things that do not exist in upstream mpv:
 
-### 1. Custom pull-based AO driver
+### 1. Custom callback / pull-capable AO driver
 
 mpv's internal `ao_driver` interface has both push and pull modes. Pull-based AOs call
 `ao_read_data()` when they are ready for samples. A new `ao_godot.c` driver would:
@@ -410,13 +530,16 @@ mpv's internal `ao_driver` interface has both push and pull modes. Pull-based AO
   dedicated thread whenever a new audio period is available
 - use `ao_read_data()` to fill the period buffer, then hand decoded PCM to the callback
 
-The callback setter must be exposed through the public libmpv API. The cleanest mechanism
-is a new `mpv_set_option_string` key (e.g. `ao=godot`) combined with a new
-`mpv_set_godot_audio_callback(mpv_handle *, callback_fn, void *userdata)` entry point
-added to the libmpv shared library and declared in an extension header.
+The callback setter must be exposed through the public libmpv API. The current local path
+already uses a dedicated `mpv_godot_audio_set_callback(mpv_handle *, callback_fn, void *userdata)`
+entry point added to the shared library and declared in an extension header.
 
 The existing `ao_pcm.c` (writes decoded PCM to file) and `ao_openal.c` (pull-based via
 OpenAL callback) are the closest reference implementations inside the mpv tree.
+
+Current finding: the present `ao_godot.c` proves decode extraction, but because it paces
+itself on a timer thread rather than a real playback-delay model, it should be considered
+an intermediate step rather than the final sync design.
 
 ### 2. Vulkan libmpv render backend (Phase 2)
 
@@ -557,8 +680,10 @@ the dependency management problem is simpler than Windows.
 | Godot render-thread constraints complicate Vulkan interop | High | Phase 0 exists specifically to de-risk this before product work proceeds |
 | Importing Godot's Vulkan device into mpv/libplacebo is more constrained than expected | High | Verify with the smallest possible shared-device spike before broad implementation |
 | mpv Vulkan libmpv backend becomes larger than anticipated | High | Treat fork maintenance as planned product cost, not surprise work |
-| Audio extraction path in mpv is awkward or fragile | Medium-High | Start with the smallest callback-capable AO design that exposes decoded PCM reliably |
-| A/V sync drift between mpv decode and Godot playback | Medium-High | Add instrumentation and tune buffer depth before chasing perfect sync |
+| Audio extraction path in mpv is awkward or fragile | Medium-High | Keep the current forked callback path, but move final sync responsibility to a pull-style Godot playback integration |
+| A/V sync drift between mpv decode and Godot playback | High | Current generator-fed prototype already shows audible xruns; treat pull-style playback as the mitigation, not just larger buffers |
+| GDExtension lacks a clean audio-thread hook | High | Investigate a small local Godot patch versus plugin-owned custom playback object |
+| Steam Audio integration fights the chosen Godot audio surface | High | Align with custom playback / `_mix()` patterns instead of generator-only streams |
 | Stereo speaker routing API proves awkward in Godot scenes | Medium | Build a concrete sample scene early and iterate from real usage |
 | Windows packaging of forked mpv runtime becomes messy | Medium | Publish pinned artifacts and make the plugin consume exactly those binaries |
 
@@ -586,10 +711,16 @@ the dependency management problem is simpler than Windows.
 
 ## Phase 3 verification
 
+- audio is consumed from a pull-style playback path, not only `AudioStreamGeneratorPlayback`
+- stereo sync sample plays without audible xruns
+- EOF drains cleanly
+- at least one Steam Audio integration experiment succeeds or is ruled out with evidence
+## Phase 4 verification
+
 - CI builds plugin and forked mpv artifacts reproducibly
 - packaged addon works in a fresh sample project
 
-## Phase 4 verification
+## Phase 5 verification
 
 - OpenXR VR scene playback remains stable
 - virtual speaker placement behaves correctly
@@ -597,8 +728,9 @@ the dependency management problem is simpler than Windows.
 
 ## Immediate Next Steps
 
-1. Rename the template scaffold to real library and entrypoint names so the repo matches the project.
-2. Build the smallest possible Phase 0 render-thread/Vulkan texture interop spike.
-3. Decide the minimum mpv fork layout and CI artifact strategy before significant player code is written.
-4. After Phase 0 succeeds, implement the minimal backend-separated player shell and audio channel routing path.
+1. Clean up the current prototype code so the repo surface matches the Vulkan-only architecture already proven locally.
+2. Investigate the best production audio integration path:
+   engine patch for audio-thread hooks vs plugin-owned custom playback object.
+3. Prototype a pull-style per-channel playback path that can coexist with Steam Audio expectations.
+4. Once the production audio path is chosen, return to packaging and VR validation with that architecture fixed.
 
