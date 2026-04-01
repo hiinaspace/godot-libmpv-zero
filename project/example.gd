@@ -7,17 +7,17 @@ const SPEAKER_OFFSETS := [
 
 var _audio_players: Array[AudioStreamPlayer3D] = []
 var _status_timer := 0.0
-var _awaiting_audio_drain := false
-var _audio_started := false
 var _player: MPVPlayer
 var _video_plane: MeshInstance3D
 var _video_material: StandardMaterial3D
 var _status_label: Label
 var _mpv_status_label: Label
 var _last_video_status := ""
+var _auto_quit := false
 
 
 func _ready() -> void:
+	_auto_quit = OS.get_environment("LIBMPV_ZERO_AUTOQUIT") == "1"
 	_create_world()
 	_create_overlay()
 	_create_player()
@@ -52,15 +52,13 @@ func _process(delta: float) -> void:
 		int(audio_diag.get("max_queued_frames", 0)),
 		int(audio_diag.get("underrun_count", 0)),
 	])
-	if not _audio_started and int(audio_diag.get("max_queued_frames", 0)) >= 4800:
-		for audio_player in _audio_players:
-			audio_player.stream_paused = false
-		_audio_started = true
-	if _awaiting_audio_drain and int(audio_diag.get("total_queued_frames", 0)) == 0:
-		for audio_player in _audio_players:
-			audio_player.stop()
-		_awaiting_audio_drain = false
-		_audio_started = false
+	print("example.gd audio per-channel queued: %s" % [audio_diag.get("queued_frames_per_channel", PackedInt32Array())])
+	print("example.gd audio per-channel pulls: calls=%s frames=%s consumed=%s playing=%s" % [
+		audio_diag.get("pull_calls_per_channel", PackedInt32Array()),
+		audio_diag.get("pulled_frames_per_channel", PackedInt32Array()),
+		audio_diag.get("consumed_frames_per_channel", PackedInt32Array()),
+		audio_diag.get("playing_per_channel", []),
+	])
 
 
 func _create_world() -> void:
@@ -141,8 +139,6 @@ func _on_audio_channels_changed(count: int) -> void:
 	for audio_player in _audio_players:
 		audio_player.queue_free()
 	_audio_players.clear()
-	_audio_started = false
-	_awaiting_audio_drain = false
 
 	for i in range(count):
 		var audio_player := AudioStreamPlayer3D.new()
@@ -153,12 +149,9 @@ func _on_audio_channels_changed(count: int) -> void:
 		audio_player.max_distance = 12.0
 		audio_player.unit_size = 2.0
 		add_child(audio_player)
-		audio_player.stream_paused = true
+		audio_player.stream_paused = false
 		audio_player.play()
-		var playback := audio_player.get_stream_playback()
-		if playback:
-			_player.attach_audio_playback(i, playback)
-			_audio_players.append(audio_player)
+		_audio_players.append(audio_player)
 
 
 func _on_video_size_changed(width: int, height: int) -> void:
@@ -185,5 +178,14 @@ func _on_texture_changed() -> void:
 func _on_playback_finished() -> void:
 	_status_label.text = "mpv playback finished"
 	_mpv_status_label.text = "mpv: %s" % _player.get_mpv_status()
-	_awaiting_audio_drain = true
+	for audio_player in _audio_players:
+		audio_player.stop()
 	print("example.gd playback_finished signal")
+	if _auto_quit:
+		get_tree().create_timer(2.0).timeout.connect(_quit_after_capture)
+
+
+func _quit_after_capture() -> void:
+	if is_inside_tree():
+		print("example.gd auto quit")
+		get_tree().quit()

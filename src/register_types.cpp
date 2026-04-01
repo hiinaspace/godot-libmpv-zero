@@ -5,6 +5,7 @@
 #include <godot_cpp/core/defs.hpp>
 #include <godot_cpp/godot.hpp>
 
+#include "channel_audio_stream.h"
 #include "mpv_player.h"
 #include "render_thread_service.h"
 
@@ -14,6 +15,8 @@ void initialize_gdextension_types(ModuleInitializationLevel p_level) {
 	if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
 		return;
 	}
+	GDREGISTER_CLASS(ChannelAudioStream);
+	GDREGISTER_CLASS(ChannelAudioStreamPlayback);
 	GDREGISTER_CLASS(MPVPlayer);
 	GDREGISTER_CLASS(libmpv_zero::RenderThreadService);
 }

@@ -31,7 +31,6 @@ void MPVPlayer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_texture"), &MPVPlayer::get_texture);
 	ClassDB::bind_method(D_METHOD("get_audio_channel_count"), &MPVPlayer::get_audio_channel_count);
 	ClassDB::bind_method(D_METHOD("get_audio_stream_for_channel", "channel_index"), &MPVPlayer::get_audio_stream_for_channel);
-	ClassDB::bind_method(D_METHOD("attach_audio_playback", "channel_index", "playback"), &MPVPlayer::attach_audio_playback);
 	ClassDB::bind_method(D_METHOD("get_audio_diagnostics"), &MPVPlayer::get_audio_diagnostics);
 	ClassDB::bind_method(D_METHOD("get_video_status"), &MPVPlayer::get_video_status);
 	ClassDB::bind_method(D_METHOD("get_mpv_status"), &MPVPlayer::get_mpv_status);
@@ -131,10 +130,6 @@ Ref<AudioStream> MPVPlayer::get_audio_stream_for_channel(int p_channel_index) co
 	return audio_bridge->get_audio_stream_for_channel(p_channel_index);
 }
 
-void MPVPlayer::attach_audio_playback(int p_channel_index, const Ref<AudioStreamGeneratorPlayback> &p_playback) {
-	audio_bridge->set_channel_playback(p_channel_index, p_playback);
-}
-
 Dictionary MPVPlayer::get_audio_diagnostics() const {
 	const libmpv_zero::AudioBridge::Diagnostics diagnostics = audio_bridge->get_diagnostics();
 
@@ -144,6 +139,31 @@ Dictionary MPVPlayer::get_audio_diagnostics() const {
 	result["max_queued_frames"] = diagnostics.max_queued_frames;
 	result["total_queued_frames"] = diagnostics.total_queued_frames;
 	result["underrun_count"] = diagnostics.underrun_count;
+	PackedInt32Array per_channel;
+	for (int queued_frames : diagnostics.queued_frames_per_channel) {
+		per_channel.push_back(queued_frames);
+	}
+	result["queued_frames_per_channel"] = per_channel;
+	PackedInt32Array pull_calls;
+	for (int pull_count : diagnostics.pull_calls_per_channel) {
+		pull_calls.push_back(pull_count);
+	}
+	result["pull_calls_per_channel"] = pull_calls;
+	PackedInt32Array pulled_frames;
+	for (int frame_count : diagnostics.pulled_frames_per_channel) {
+		pulled_frames.push_back(frame_count);
+	}
+	result["pulled_frames_per_channel"] = pulled_frames;
+	PackedInt32Array consumed_frames;
+	for (int frame_count : diagnostics.consumed_frames_per_channel) {
+		consumed_frames.push_back(frame_count);
+	}
+	result["consumed_frames_per_channel"] = consumed_frames;
+	Array playing_per_channel;
+	for (bool channel_playing : diagnostics.playing_per_channel) {
+		playing_per_channel.push_back(channel_playing);
+	}
+	result["playing_per_channel"] = playing_per_channel;
 	return result;
 }
 
@@ -194,7 +214,6 @@ void MPVPlayer::_sync_mpv_state() {
 	}
 
 	const libmpv_zero::MpvCore::PollResult poll_result = mpv_core->poll();
-	audio_bridge->flush_to_playbacks();
 	if (video_output_backend) {
 		video_output_backend->update();
 		video_status = video_output_backend->get_status();

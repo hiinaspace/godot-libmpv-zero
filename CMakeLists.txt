@@ -50,6 +50,8 @@ target_sources(${LIBNAME}
     PRIVATE
     src/register_types.cpp
     src/register_types.h
+    src/channel_audio_stream.cpp
+    src/channel_audio_stream.h
     src/mpv_core.cpp
     src/mpv_core.h
     src/mini_mpv_client.h

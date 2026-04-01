@@ -3,7 +3,6 @@
 #include <memory>
 
 #include <godot_cpp/classes/audio_stream.hpp>
-#include <godot_cpp/classes/audio_stream_generator_playback.hpp>
 #include <godot_cpp/classes/node.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/variant/string.hpp>
@@ -60,7 +59,6 @@ public:
 	Ref<Texture2D> get_texture() const;
 	int get_audio_channel_count() const;
 	Ref<AudioStream> get_audio_stream_for_channel(int p_channel_index) const;
-	void attach_audio_playback(int p_channel_index, const Ref<AudioStreamGeneratorPlayback> &p_playback);
 	Dictionary get_audio_diagnostics() const;
 	String get_video_status() const;
 	String get_mpv_status() const;
