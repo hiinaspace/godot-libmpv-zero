@@ -61,6 +61,7 @@ compile_commands.json
 cmake-build*
 CMakeUserPresets.json
 build-phase0/
+dependencies/
 
 # Local top-level build outputs
 bin/windows/*

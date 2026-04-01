@@ -49,6 +49,19 @@ target_sources(${LIBNAME}
     PRIVATE
     src/register_types.cpp
     src/register_types.h
+    src/mpv_core.cpp
+    src/mpv_core.h
+    src/mini_mpv_client.h
+    src/audio_bridge.cpp
+    src/audio_bridge.h
+    src/video_output_backend.h
+    src/sw_video_output.cpp
+    src/sw_video_output.h
+    src/vk_video_output.cpp
+    src/vk_video_output.h
+    src/mpv_player.cpp
+    src/mpv_player.h
+    src/mini_vulkan.h
     src/phase0_texture_probe.cpp
     src/phase0_texture_probe.h
 )
