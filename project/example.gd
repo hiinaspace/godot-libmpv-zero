@@ -22,7 +22,7 @@ func _ready() -> void:
 	_create_overlay()
 	_create_player()
 
-	var smoke_test_path := ProjectSettings.globalize_path("res://smoke_test.mp4")
+	var smoke_test_path := ProjectSettings.globalize_path("res://smoke_test_lr_sync.mp4")
 	_player.load_file(smoke_test_path)
 	_player.play()
 	print("example.gd load_file issued: %s" % smoke_test_path)
@@ -98,7 +98,7 @@ func _create_overlay() -> void:
 	vbox.add_child(_mpv_status_label)
 
 	var hint_label := Label.new()
-	hint_label.text = "Orange/blue spheres mark left/right virtual speakers."
+	hint_label.text = "Video alternates left/right flashes to match speaker tones."
 	vbox.add_child(hint_label)
 
 
