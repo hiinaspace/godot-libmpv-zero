@@ -39,22 +39,29 @@ void VkVideoOutput::_render_frame_on_render_thread() {
 		render_thread_logged = true;
 	}
 
-	if (!render_context || !external_texture.success) {
+	if (!render_context || render_slot_index < 0 || render_slot_index >= static_cast<int>(slots.size())) {
+		last_render_result.store(0, std::memory_order_release);
+		render_request_in_flight.store(false, std::memory_order_release);
+		return;
+	}
+
+	TextureSlot &slot = slots[render_slot_index];
+	if (!slot.handle.success) {
 		last_render_result.store(0, std::memory_order_release);
 		render_request_in_flight.store(false, std::memory_order_release);
 		return;
 	}
 
 	mpv_vulkan_image image = {};
-	image.image = reinterpret_cast<VkImage>(external_texture.image_handle);
-	image.width = static_cast<int>(external_texture.width);
-	image.height = static_cast<int>(external_texture.height);
+	image.image = reinterpret_cast<VkImage>(slot.handle.image_handle);
+	image.width = static_cast<int>(slot.handle.width);
+	image.height = static_cast<int>(slot.handle.height);
 	image.depth = 0;
 	image.aspect = VK_IMAGE_ASPECT_COLOR_BIT;
 	image.format = VK_FORMAT_R8G8B8A8_UNORM;
 	image.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-	image.layout = image_layout;
-	image.queue_family = external_texture.queue_family_index;
+	image.layout = slot.image_layout;
+	image.queue_family = slot.handle.queue_family_index;
 
 	mpv_render_param render_params[] = {
 		{ MPV_RENDER_PARAM_VULKAN_IMAGE, &image },
@@ -66,7 +73,9 @@ void VkVideoOutput::_render_frame_on_render_thread() {
 		UtilityFunctions::print(vformat("VkVideoOutput render-thread result: %d", render_result));
 	}
 	if (render_result >= 0) {
-		image_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		slot.image_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		slot.published = false;
+		last_rendered_slot.store(render_slot_index, std::memory_order_release);
 		successful_render_count.fetch_add(1, std::memory_order_acq_rel);
 	}
 	last_render_result.store(render_result, std::memory_order_release);
@@ -119,11 +128,27 @@ void VkVideoOutput::_unload_render_dispatch() {
 	dispatch = RenderDispatch();
 }
 
-bool VkVideoOutput::_ensure_external_texture(int p_width, int p_height) {
+bool VkVideoOutput::_slot_matches_size(const TextureSlot &p_slot, int p_width, int p_height) const {
+	return p_slot.handle.success && static_cast<int>(p_slot.handle.width) == p_width && static_cast<int>(p_slot.handle.height) == p_height;
+}
+
+bool VkVideoOutput::_ensure_external_textures(int p_width, int p_height, int p_target_count) {
 	if (!render_thread_service || p_width <= 0 || p_height <= 0) {
 		return false;
 	}
-	if (external_texture.success && static_cast<int>(external_texture.width) == p_width && static_cast<int>(external_texture.height) == p_height) {
+
+	int matching_slots = 0;
+	for (TextureSlot &slot : slots) {
+		if (_slot_matches_size(slot, p_width, p_height)) {
+			matching_slots += 1;
+			continue;
+		}
+		if (slot.handle.success) {
+			_retire_slot(slot, 120);
+		}
+	}
+
+	if (matching_slots >= p_target_count) {
 		return true;
 	}
 	if (texture_request_in_flight && requested_width == p_width && requested_height == p_height) {
@@ -153,7 +178,14 @@ bool VkVideoOutput::_ensure_render_context() {
 	if (render_context) {
 		return true;
 	}
-	if (!external_texture.success || !mpv_core || !mpv_core->is_initialized()) {
+	const TextureSlot *init_slot = nullptr;
+	for (const TextureSlot &slot : slots) {
+		if (slot.handle.success) {
+			init_slot = &slot;
+			break;
+		}
+	}
+	if (!init_slot || !mpv_core || !mpv_core->is_initialized()) {
 		return false;
 	}
 	if (!_load_render_dispatch()) {
@@ -161,11 +193,11 @@ bool VkVideoOutput::_ensure_render_context() {
 	}
 
 	mpv_vulkan_init_params init_params = {};
-	init_params.instance = reinterpret_cast<VkInstance>(external_texture.instance_handle);
+	init_params.instance = reinterpret_cast<VkInstance>(init_slot->handle.instance_handle);
 	init_params.get_proc_addr = dispatch.get_instance_proc_addr;
-	init_params.phys_device = reinterpret_cast<VkPhysicalDevice>(external_texture.physical_device_handle);
-	init_params.device = reinterpret_cast<VkDevice>(external_texture.logical_device);
-	init_params.queue_graphics.index = external_texture.queue_family_index;
+	init_params.phys_device = reinterpret_cast<VkPhysicalDevice>(init_slot->handle.physical_device_handle);
+	init_params.device = reinterpret_cast<VkDevice>(init_slot->handle.logical_device);
+	init_params.queue_graphics.index = init_slot->handle.queue_family_index;
 	init_params.queue_graphics.count = 1;
 
 	mpv_render_param params[] = {
@@ -190,17 +222,81 @@ bool VkVideoOutput::_ensure_render_context() {
 	return true;
 }
 
-void VkVideoOutput::_handle_texture_ready() {
+void VkVideoOutput::_publish_slot(int p_slot_index) {
+	if (p_slot_index < 0 || p_slot_index >= static_cast<int>(slots.size())) {
+		return;
+	}
+
+	TextureSlot &slot = slots[p_slot_index];
+	if (!slot.handle.success) {
+		return;
+	}
+
 	if (texture.is_null()) {
 		texture.instantiate();
 	}
-	texture->set_texture_rd_rid(external_texture.wrapped_texture);
+	texture->set_texture_rd_rid(slot.handle.wrapped_texture);
 	status = "vulkan external texture ready";
-	image_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-	texture_published = true;
+	published_slot_index = p_slot_index;
+	slot.published = true;
 	if (texture_ready_callback.is_valid()) {
 		texture_ready_callback.call(texture);
 	}
+}
+
+void VkVideoOutput::_retire_slot(TextureSlot &p_slot, int p_delay_updates) {
+	if (!p_slot.handle.success) {
+		return;
+	}
+
+	if (published_slot_index >= 0 && slots[published_slot_index].handle.wrapped_texture == p_slot.handle.wrapped_texture && texture.is_valid()) {
+		texture->set_texture_rd_rid(RID());
+		published_slot_index = -1;
+	}
+
+	retired_textures.push_back({ p_slot.handle, p_delay_updates });
+	p_slot = TextureSlot();
+}
+
+void VkVideoOutput::_poll_retired_textures() {
+	for (RetiredTexture &retired : retired_textures) {
+		if (retired.release_after_updates > 0) {
+			retired.release_after_updates -= 1;
+		}
+	}
+
+	if (!render_thread_service || render_thread_service->has_pending_work()) {
+		return;
+	}
+
+	for (size_t i = 0; i < retired_textures.size(); ++i) {
+		if (retired_textures[i].release_after_updates > 0) {
+			continue;
+		}
+		_release_external_texture(retired_textures[i].handle);
+		retired_textures.erase(retired_textures.begin() + static_cast<int64_t>(i));
+		break;
+	}
+}
+
+int VkVideoOutput::_find_next_render_slot() const {
+	for (int i = 0; i < static_cast<int>(slots.size()); ++i) {
+		if (!slots[i].handle.success) {
+			continue;
+		}
+		if (static_cast<int>(slots.size()) > 1 && i == published_slot_index) {
+			continue;
+		}
+		return i;
+	}
+
+	for (int i = 0; i < static_cast<int>(slots.size()); ++i) {
+		if (slots[i].handle.success) {
+			return i;
+		}
+	}
+
+	return -1;
 }
 
 void VkVideoOutput::_release_external_texture(const RenderThreadService::ExternalTextureHandle &p_texture) {
@@ -225,7 +321,7 @@ void VkVideoOutput::attach(Node *p_owner, MpvCore *p_mpv_core, const Callable &p
 	requested_height = 0;
 	texture_request_in_flight = false;
 	status = "vulkan backend waiting for video size";
-	_ensure_external_texture(1, 1);
+	_ensure_external_textures(1, 1, 1);
 	if (!attach_logged) {
 		UtilityFunctions::print("VkVideoOutput attached");
 		attach_logged = true;
@@ -253,12 +349,21 @@ void VkVideoOutput::update() {
 			texture_ready_logged = true;
 		}
 
-		if (external_texture.success && external_texture.wrapped_texture != result.wrapped_texture) {
-			_release_external_texture(external_texture);
+		bool stored = false;
+		for (TextureSlot &slot : slots) {
+			if (!slot.handle.success) {
+				slot.handle = result;
+				slot.image_layout = VK_IMAGE_LAYOUT_UNDEFINED;
+				slot.published = false;
+				stored = true;
+				break;
+			}
 		}
-		external_texture = result;
-		image_layout = VK_IMAGE_LAYOUT_UNDEFINED;
+		if (!stored) {
+			retired_textures.push_back({ result, 120 });
+		}
 	}
+	_poll_retired_textures();
 
 	if (!mpv_core) {
 		return;
@@ -274,8 +379,16 @@ void VkVideoOutput::update() {
 
 	const int video_width = mpv_core->get_video_width();
 	const int video_height = mpv_core->get_video_height();
-	if (!_ensure_external_texture(video_width, video_height)) {
+	if (!_ensure_external_textures(video_width, video_height, 2)) {
 		return;
+	}
+
+	const int finished_slot = last_rendered_slot.exchange(-1, std::memory_order_acq_rel);
+	if (finished_slot >= 0 && finished_slot != published_slot_index) {
+		UtilityFunctions::print(vformat(
+				"VkVideoOutput publishing completed frame after %d update callbacks",
+				update_callback_count.load(std::memory_order_acquire)));
+		_publish_slot(finished_slot);
 	}
 
 	const bool forced_dirty = frame_dirty.exchange(false, std::memory_order_relaxed);
@@ -311,13 +424,6 @@ void VkVideoOutput::update() {
 		return;
 	}
 
-	if (!texture_published && successful_render_count.load(std::memory_order_acquire) >= 1) {
-		UtilityFunctions::print(vformat(
-				"VkVideoOutput publishing completed frame after %d update callbacks",
-				update_callback_count.load(std::memory_order_acquire)));
-		_handle_texture_ready();
-	}
-
 	if (render_request_in_flight.exchange(true, std::memory_order_acq_rel)) {
 		return;
 	}
@@ -329,12 +435,19 @@ void VkVideoOutput::update() {
 		return;
 	}
 
+	render_slot_index = _find_next_render_slot();
+	if (render_slot_index < 0) {
+		render_request_in_flight.store(false, std::memory_order_release);
+		status = "no Vulkan render slot available";
+		return;
+	}
+
 	rendering_server->call_on_render_thread(callable_mp_static(&VkVideoOutput::_render_frame_on_render_thread_static).bind(reinterpret_cast<uint64_t>(this)));
 	if (!render_queue_logged) {
 		UtilityFunctions::print("VkVideoOutput queued render-thread frame");
 		render_queue_logged = true;
 	}
-	status = vformat("queued Vulkan frame %dx%d", external_texture.width, external_texture.height);
+	status = vformat("queued Vulkan frame %dx%d", slots[render_slot_index].handle.width, slots[render_slot_index].handle.height);
 }
 
 void VkVideoOutput::detach() {
@@ -353,14 +466,21 @@ void VkVideoOutput::detach() {
 		texture->set_texture_rd_rid(RID());
 		texture.unref();
 	}
-	_release_external_texture(external_texture);
+
+	for (TextureSlot &slot : slots) {
+		_release_external_texture(slot.handle);
+		slot = TextureSlot();
+	}
+	for (const RetiredTexture &retired : retired_textures) {
+		_release_external_texture(retired.handle);
+	}
+	retired_textures.clear();
 	if (render_thread_service->has_pending_work()) {
 		render_thread_service = nullptr;
 	} else {
 		memdelete(render_thread_service);
 		render_thread_service = nullptr;
 	}
-	external_texture = RenderThreadService::ExternalTextureHandle();
 	mpv_core = nullptr;
 	requested_width = 0;
 	requested_height = 0;
@@ -368,6 +488,7 @@ void VkVideoOutput::detach() {
 	render_request_in_flight.store(false, std::memory_order_release);
 	last_render_result.store(0, std::memory_order_release);
 	successful_render_count.store(0, std::memory_order_release);
+	last_rendered_slot.store(-1, std::memory_order_release);
 	readback_logged = false;
 	render_queue_logged = false;
 	render_thread_logged = false;
@@ -375,7 +496,8 @@ void VkVideoOutput::detach() {
 	update_flags_logged = false;
 	forced_render_logged = false;
 	update_callback_logged = false;
-	texture_published = false;
+	published_slot_index = -1;
+	render_slot_index = -1;
 	status = "vulkan video backend detached";
 }
 

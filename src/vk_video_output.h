@@ -5,6 +5,8 @@
 #include "video_output_backend.h"
 
 #include <atomic>
+#include <array>
+#include <vector>
 
 #include <godot_cpp/classes/texture2drd.hpp>
 
@@ -20,6 +22,17 @@ public:
 	godot::String get_status() const override;
 
 private:
+	struct TextureSlot {
+		RenderThreadService::ExternalTextureHandle handle;
+		VkImageLayout image_layout = VK_IMAGE_LAYOUT_UNDEFINED;
+		bool published = false;
+	};
+
+	struct RetiredTexture {
+		RenderThreadService::ExternalTextureHandle handle;
+		int release_after_updates = 0;
+	};
+
 	struct RenderDispatch {
 #ifdef _WIN32
 		void *library = nullptr;
@@ -38,16 +51,21 @@ private:
 	void _render_frame_on_render_thread();
 	bool _load_render_dispatch();
 	void _unload_render_dispatch();
-	bool _ensure_external_texture(int p_width, int p_height);
+	bool _ensure_external_textures(int p_width, int p_height, int p_target_count);
 	bool _ensure_render_context();
-	void _handle_texture_ready();
+	void _publish_slot(int p_slot_index);
+	void _retire_slot(TextureSlot &p_slot, int p_delay_updates);
+	void _poll_retired_textures();
+	int _find_next_render_slot() const;
+	bool _slot_matches_size(const TextureSlot &p_slot, int p_width, int p_height) const;
 	void _release_external_texture(const RenderThreadService::ExternalTextureHandle &p_texture);
 
 	RenderDispatch dispatch;
 	RenderThreadService *render_thread_service = nullptr;
 	MpvCore *mpv_core = nullptr;
 	godot::Ref<godot::Texture2DRD> texture;
-	RenderThreadService::ExternalTextureHandle external_texture;
+	std::array<TextureSlot, 2> slots;
+	std::vector<RetiredTexture> retired_textures;
 	godot::Callable texture_ready_callback;
 	godot::Callable probe_failed_callback;
 	mpv_render_context *render_context = nullptr;
@@ -56,6 +74,7 @@ private:
 	std::atomic_int update_callback_count = 0;
 	std::atomic_int last_render_result = 0;
 	std::atomic_int successful_render_count = 0;
+	std::atomic_int last_rendered_slot = -1;
 	bool readback_logged = false;
 	bool render_queue_logged = false;
 	bool render_thread_logged = false;
@@ -66,8 +85,8 @@ private:
 	bool update_flags_logged = false;
 	bool forced_render_logged = false;
 	bool update_callback_logged = false;
-	bool texture_published = false;
-	VkImageLayout image_layout = VK_IMAGE_LAYOUT_UNDEFINED;
+	int published_slot_index = -1;
+	int render_slot_index = -1;
 	int requested_width = 0;
 	int requested_height = 0;
 	bool texture_request_in_flight = false;

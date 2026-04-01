@@ -42,6 +42,38 @@ T vk_load_device_proc(PFN_vkGetDeviceProcAddr p_get_device_proc_addr, VkDevice p
 	return reinterpret_cast<T>(p_get_device_proc_addr(p_device, p_name));
 }
 
+bool vk_load_release_dispatch(VkDevice p_device, VulkanDispatch &r_dispatch, String &r_error) {
+#ifdef _WIN32
+	r_dispatch.library = LoadLibraryW(L"vulkan-1.dll");
+	if (!r_dispatch.library) {
+		r_error = "failed to load vulkan-1.dll";
+		return false;
+	}
+
+	r_dispatch.get_device_proc_addr = reinterpret_cast<PFN_vkGetDeviceProcAddr>(GetProcAddress(r_dispatch.library, "vkGetDeviceProcAddr"));
+	if (!r_dispatch.get_device_proc_addr) {
+		r_error = "failed to load vkGetDeviceProcAddr";
+		FreeLibrary(r_dispatch.library);
+		r_dispatch.library = nullptr;
+		return false;
+	}
+
+	r_dispatch.destroy_image = vk_load_device_proc<PFN_vkDestroyImage>(r_dispatch.get_device_proc_addr, p_device, "vkDestroyImage");
+	r_dispatch.free_memory = vk_load_device_proc<PFN_vkFreeMemory>(r_dispatch.get_device_proc_addr, p_device, "vkFreeMemory");
+	if (!r_dispatch.destroy_image || !r_dispatch.free_memory) {
+		r_error = "failed to resolve Vulkan release functions";
+		FreeLibrary(r_dispatch.library);
+		r_dispatch = VulkanDispatch();
+		return false;
+	}
+
+	return true;
+#else
+	r_error = "render thread service currently only supports Windows";
+	return false;
+#endif
+}
+
 bool vk_load_dispatch(VkInstance p_instance, VkPhysicalDevice p_physical_device, VkDevice p_device, VulkanDispatch &r_dispatch, String &r_error) {
 #ifdef _WIN32
 	r_dispatch.library = LoadLibraryW(L"vulkan-1.dll");
@@ -388,8 +420,17 @@ void RenderThreadService::_release_external_texture_on_render_thread() {
 		rendering_device->free_rid(release.wrapped_texture);
 	}
 
-	// TODO: Destroy the raw VkImage/VkDeviceMemory after explicit retirement.
-	// Destroying immediately can race Godot's in-flight use of the wrapped RID.
+	if (release.image_handle || release.image_memory_handle) {
+		VulkanDispatch dispatch;
+		String error;
+		VkDevice device = reinterpret_cast<VkDevice>(release.logical_device);
+		if (device && vk_load_release_dispatch(device, dispatch, error)) {
+			VkImage image = reinterpret_cast<VkImage>(release.image_handle);
+			VkDeviceMemory memory = reinterpret_cast<VkDeviceMemory>(release.image_memory_handle);
+			vk_destroy_external_image(dispatch, device, image, memory);
+			vk_unload_dispatch(dispatch);
+		}
+	}
 }
 
 } // namespace libmpv_zero
