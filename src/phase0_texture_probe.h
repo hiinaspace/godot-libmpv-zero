@@ -16,10 +16,10 @@ class Phase0TextureProbe : public Node {
 	struct PendingPublish {
 		bool ready = false;
 		bool success = false;
-		RID source_texture;
 		RID wrapped_texture;
 		uint64_t logical_device = 0;
 		uint64_t image_handle = 0;
+		uint64_t image_memory_handle = 0;
 		String status;
 	};
 
@@ -33,7 +33,6 @@ class Phase0TextureProbe : public Node {
 	PendingPublish pending_publish;
 
 	Ref<Texture2DRD> published_texture;
-	RID source_texture_rid;
 	RID wrapped_texture_rid;
 
 	bool probe_requested = false;
@@ -42,6 +41,7 @@ class Phase0TextureProbe : public Node {
 	uint32_t probe_height = 256;
 	uint64_t logical_device_handle = 0;
 	uint64_t image_handle = 0;
+	uint64_t image_memory_handle = 0;
 	String status = "idle";
 
 public:
