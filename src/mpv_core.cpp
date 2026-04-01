@@ -225,8 +225,8 @@ bool MpvCore::initialize() {
 		return false;
 	}
 
-	dispatch.set_option_string(handle, "terminal", "yes");
-	dispatch.set_option_string(handle, "msg-level", "all=status");
+	dispatch.set_option_string(handle, "terminal", "no");
+	dispatch.set_option_string(handle, "msg-level", "all=warn");
 	dispatch.set_option_string(handle, "idle", "yes");
 	dispatch.set_option_string(handle, "keep-open", "yes");
 	const char *video_output_name = video_output_mode == VideoOutputMode::LIBMPV ? "libmpv" : "null";
@@ -252,6 +252,7 @@ bool MpvCore::initialize() {
 
 	initialized = true;
 	file_loaded = false;
+	eof_reached = false;
 	status = "libmpv initialized";
 	return true;
 }
@@ -266,6 +267,7 @@ void MpvCore::shutdown() {
 	initialized = false;
 	playback_state = PlaybackState::STOPPED;
 	file_loaded = false;
+	eof_reached = false;
 	loaded_path = "";
 	time_pos = 0.0;
 	duration = 0.0;
@@ -288,6 +290,7 @@ void MpvCore::load_file(const String &p_path) {
 	video_height = 0;
 	playback_state = PlaybackState::STOPPED;
 	file_loaded = false;
+	eof_reached = false;
 	status = "loading file";
 
 	CharString utf8_path = p_path.utf8();
@@ -343,6 +346,7 @@ void MpvCore::stop() {
 	time_pos = 0.0;
 	playback_state = PlaybackState::STOPPED;
 	file_loaded = false;
+	eof_reached = false;
 	status = "stop issued";
 }
 
@@ -392,12 +396,14 @@ MpvCore::PollResult MpvCore::poll() {
 				break;
 			case MPV_EVENT_FILE_LOADED:
 				file_loaded = true;
+				eof_reached = false;
 				status = "file loaded";
 				result.file_loaded = true;
 				break;
 			case MPV_EVENT_END_FILE: {
 				playback_state = PlaybackState::STOPPED;
 				file_loaded = false;
+				eof_reached = true;
 				time_pos = 0.0;
 				video_width = 0;
 				video_height = 0;
@@ -463,6 +469,15 @@ MpvCore::PollResult MpvCore::poll() {
 		if (new_state != playback_state) {
 			playback_state = new_state;
 			result.playback_state_changed = true;
+		}
+	}
+
+	bool new_eof_reached = eof_reached;
+	if (get_mpv_flag_property("eof-reached", new_eof_reached) && new_eof_reached != eof_reached) {
+		eof_reached = new_eof_reached;
+		result.eof_reached = eof_reached;
+		if (eof_reached) {
+			status = "playback finished";
 		}
 	}
 

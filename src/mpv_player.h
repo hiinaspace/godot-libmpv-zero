@@ -19,12 +19,6 @@ namespace godot {
 class MPVPlayer : public Node {
 	GDCLASS(MPVPlayer, Node)
 
-public:
-	enum VideoBackendKind {
-		VIDEO_BACKEND_SOFTWARE = 0,
-		VIDEO_BACKEND_VULKAN = 1,
-	};
-
 private:
 	static void _bind_methods();
 
@@ -46,7 +40,6 @@ private:
 	double last_known_duration = 0.0;
 	int last_video_width = 0;
 	int last_video_height = 0;
-	VideoBackendKind video_backend = VIDEO_BACKEND_SOFTWARE;
 
 public:
 	MPVPlayer();
@@ -71,10 +64,6 @@ public:
 	Dictionary get_audio_diagnostics() const;
 	String get_video_status() const;
 	String get_mpv_status() const;
-	void set_video_backend(int p_backend);
-	int get_video_backend() const;
 };
 
 } // namespace godot
-
-VARIANT_ENUM_CAST(godot::MPVPlayer::VideoBackendKind);

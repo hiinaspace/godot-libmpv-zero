@@ -4,8 +4,8 @@
 #include "render_thread_service.h"
 #include "video_output_backend.h"
 
-#include <atomic>
 #include <array>
+#include <atomic>
 #include <vector>
 
 #include <godot_cpp/classes/texture2drd.hpp>
@@ -73,18 +73,11 @@ private:
 	std::atomic_bool render_request_in_flight = false;
 	std::atomic_int update_callback_count = 0;
 	std::atomic_int last_render_result = 0;
-	std::atomic_int successful_render_count = 0;
 	std::atomic_int last_rendered_slot = -1;
-	bool readback_logged = false;
-	bool render_queue_logged = false;
-	bool render_thread_logged = false;
 	bool attach_logged = false;
 	bool texture_request_logged = false;
 	bool texture_ready_logged = false;
 	bool render_context_logged = false;
-	bool update_flags_logged = false;
-	bool forced_render_logged = false;
-	bool update_callback_logged = false;
 	int published_slot_index = -1;
 	int render_slot_index = -1;
 	int requested_width = 0;

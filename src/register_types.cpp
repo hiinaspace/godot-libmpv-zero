@@ -6,7 +6,6 @@
 #include <godot_cpp/godot.hpp>
 
 #include "mpv_player.h"
-#include "phase0_texture_probe.h"
 #include "render_thread_service.h"
 
 using namespace godot;
@@ -16,7 +15,6 @@ void initialize_gdextension_types(ModuleInitializationLevel p_level) {
 		return;
 	}
 	GDREGISTER_CLASS(MPVPlayer);
-	GDREGISTER_CLASS(Phase0TextureProbe);
 	GDREGISTER_CLASS(libmpv_zero::RenderThreadService);
 }
 

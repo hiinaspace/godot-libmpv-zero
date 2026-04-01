@@ -2,7 +2,6 @@
 
 #include "audio_bridge.h"
 #include "mpv_core.h"
-#include "sw_video_output.h"
 #include "video_output_backend.h"
 #include "vk_video_output.h"
 
@@ -21,9 +20,6 @@ MPVPlayer::MPVPlayer() :
 MPVPlayer::~MPVPlayer() = default;
 
 void MPVPlayer::_bind_methods() {
-	BIND_ENUM_CONSTANT(VIDEO_BACKEND_SOFTWARE);
-	BIND_ENUM_CONSTANT(VIDEO_BACKEND_VULKAN);
-
 	ClassDB::bind_method(D_METHOD("load_file", "path"), &MPVPlayer::load_file);
 	ClassDB::bind_method(D_METHOD("play"), &MPVPlayer::play);
 	ClassDB::bind_method(D_METHOD("pause"), &MPVPlayer::pause);
@@ -39,19 +35,17 @@ void MPVPlayer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_audio_diagnostics"), &MPVPlayer::get_audio_diagnostics);
 	ClassDB::bind_method(D_METHOD("get_video_status"), &MPVPlayer::get_video_status);
 	ClassDB::bind_method(D_METHOD("get_mpv_status"), &MPVPlayer::get_mpv_status);
-	ClassDB::bind_method(D_METHOD("set_video_backend", "backend"), &MPVPlayer::set_video_backend);
-	ClassDB::bind_method(D_METHOD("get_video_backend"), &MPVPlayer::get_video_backend);
 
 	ADD_SIGNAL(MethodInfo("file_loaded"));
 	ADD_SIGNAL(MethodInfo("playback_finished"));
 	ADD_SIGNAL(MethodInfo("position_changed", PropertyInfo(Variant::FLOAT, "time")));
 	ADD_SIGNAL(MethodInfo("video_size_changed", PropertyInfo(Variant::INT, "width"), PropertyInfo(Variant::INT, "height")));
+	ADD_SIGNAL(MethodInfo("texture_changed"));
 	ADD_SIGNAL(MethodInfo("audio_channels_changed", PropertyInfo(Variant::INT, "count")));
 
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "texture", PROPERTY_HINT_RESOURCE_TYPE, "Texture2D"), "", "get_texture");
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "video_status"), "", "get_video_status");
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "mpv_status"), "", "get_mpv_status");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "video_backend", PROPERTY_HINT_ENUM, "Software,Vulkan"), "set_video_backend", "get_video_backend");
 }
 
 void MPVPlayer::_ready() {
@@ -70,6 +64,8 @@ void MPVPlayer::_exit_tree() {
 }
 
 void MPVPlayer::load_file(const String &p_path) {
+	audio_bridge->clear_queued_audio();
+	audio_bridge->set_playback_active(false);
 	if (video_output_backend && !video_output_backend->is_ready_for_playback()) {
 		pending_load_path = p_path;
 		video_status = "waiting for video backend";
@@ -82,6 +78,7 @@ void MPVPlayer::load_file(const String &p_path) {
 }
 
 void MPVPlayer::play() {
+	audio_bridge->set_playback_active(true);
 	if (video_output_backend && !video_output_backend->is_ready_for_playback()) {
 		pending_play = true;
 		video_status = "waiting for video backend";
@@ -93,10 +90,13 @@ void MPVPlayer::play() {
 
 void MPVPlayer::pause() {
 	mpv_core->pause();
+	audio_bridge->set_playback_active(false);
 }
 
 void MPVPlayer::stop() {
 	mpv_core->stop();
+	audio_bridge->clear_queued_audio();
+	audio_bridge->set_playback_active(false);
 }
 
 void MPVPlayer::seek(double p_seconds) {
@@ -159,39 +159,10 @@ String MPVPlayer::get_mpv_status() const {
 	return mpv_core ? mpv_core->get_status() : String("mpv unavailable");
 }
 
-void MPVPlayer::set_video_backend(int p_backend) {
-	const VideoBackendKind new_backend = p_backend == VIDEO_BACKEND_VULKAN ? VIDEO_BACKEND_VULKAN : VIDEO_BACKEND_SOFTWARE;
-	if (video_backend == new_backend) {
-		return;
-	}
-
-	video_backend = new_backend;
-	video_texture.unref();
-	last_video_width = 0;
-	last_video_height = 0;
-	last_known_duration = 0.0;
-	pending_load_path = "";
-	pending_play = false;
-
-	if (is_inside_tree()) {
-		_shutdown_runtime();
-	}
-
-	_recreate_video_output_backend();
-	_configure_mpv_core_for_backend();
-
-	if (is_inside_tree()) {
-		_initialize_runtime();
-	}
-}
-
-int MPVPlayer::get_video_backend() const {
-	return video_backend;
-}
-
 void MPVPlayer::_on_video_texture_ready(const Ref<Texture2D> &p_texture) {
 	video_texture = p_texture;
 	video_status = "texture ready";
+	emit_signal("texture_changed");
 
 	int width = 0;
 	int height = 0;
@@ -204,9 +175,11 @@ void MPVPlayer::_on_video_texture_ready(const Ref<Texture2D> &p_texture) {
 		height = p_texture->get_height();
 	}
 	if (width > 0 && height > 0) {
-		last_video_width = width;
-		last_video_height = height;
-		emit_signal("video_size_changed", width, height);
+		if (width != last_video_width || height != last_video_height) {
+			last_video_width = width;
+			last_video_height = height;
+			emit_signal("video_size_changed", width, height);
+		}
 	}
 }
 
@@ -243,13 +216,18 @@ void MPVPlayer::_sync_mpv_state() {
 	}
 
 	if (poll_result.file_loaded) {
+		audio_bridge->set_source_active(true);
 		emit_signal("file_loaded");
 	}
 	if (poll_result.position_changed) {
 		emit_signal("position_changed", mpv_core->get_time_pos());
 	}
-	if (poll_result.playback_finished) {
-		emit_signal("playback_finished");
+	if (poll_result.playback_finished || poll_result.eof_reached) {
+		audio_bridge->set_playback_active(false);
+		audio_bridge->set_source_active(false);
+		if (!poll_result.playback_finished || mpv_core->get_playback_state() == libmpv_zero::MpvCore::PlaybackState::STOPPED) {
+			emit_signal("playback_finished");
+		}
 	}
 	if (poll_result.video_reconfigured || poll_result.file_loaded) {
 		const int width = mpv_core->get_video_width();
@@ -322,15 +300,6 @@ void MPVPlayer::_shutdown_runtime() {
 }
 
 void MPVPlayer::_recreate_video_output_backend() {
-	switch (video_backend) {
-		case VIDEO_BACKEND_VULKAN:
-			video_output_backend = std::make_unique<libmpv_zero::VkVideoOutput>();
-			video_status = "vulkan video backend selected";
-			break;
-		case VIDEO_BACKEND_SOFTWARE:
-		default:
-			video_output_backend = std::make_unique<libmpv_zero::SwVideoOutput>();
-			video_status = "software video backend selected";
-			break;
-	}
+	video_output_backend = std::make_unique<libmpv_zero::VkVideoOutput>();
+	video_status = "vulkan video backend selected";
 }

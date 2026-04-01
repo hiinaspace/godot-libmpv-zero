@@ -15,6 +15,28 @@ void AudioBridge::reset() {
 	sample_rate = 48000;
 	configuration_changed = true;
 	underrun_count = 0;
+	source_active = false;
+	playback_active = false;
+}
+
+void AudioBridge::clear_queued_audio() {
+	std::lock_guard<std::mutex> lock(mutex);
+	for (ChannelState &channel : channels) {
+		channel.queued_samples.clear();
+	}
+	underrun_count = 0;
+	source_active = false;
+	playback_active = false;
+}
+
+void AudioBridge::set_source_active(bool p_active) {
+	std::lock_guard<std::mutex> lock(mutex);
+	source_active = p_active;
+}
+
+void AudioBridge::set_playback_active(bool p_active) {
+	std::lock_guard<std::mutex> lock(mutex);
+	playback_active = p_active;
 }
 
 void AudioBridge::reconfigure_locked(int p_channel_count, int p_sample_rate) {
@@ -25,7 +47,7 @@ void AudioBridge::reconfigure_locked(int p_channel_count, int p_sample_rate) {
 		ChannelState channel;
 		channel.stream.instantiate();
 		channel.stream->set_mix_rate(static_cast<double>(sample_rate));
-		channel.stream->set_buffer_length(0.25);
+		channel.stream->set_buffer_length(0.5);
 		channels.push_back(channel);
 	}
 
@@ -42,7 +64,7 @@ void AudioBridge::enqueue_interleaved_f32(const float *p_samples, int p_frame_co
 		reconfigure_locked(p_channel_count, p_sample_rate);
 	}
 
-	const size_t max_samples_per_channel = static_cast<size_t>(sample_rate);
+	const size_t max_samples_per_channel = static_cast<size_t>(sample_rate) * 2;
 	for (int frame_index = 0; frame_index < p_frame_count; ++frame_index) {
 		for (int channel_index = 0; channel_index < p_channel_count; ++channel_index) {
 			ChannelState &channel = channels[static_cast<size_t>(channel_index)];
@@ -66,7 +88,7 @@ void AudioBridge::flush_to_playbacks() {
 		const int queued_frames = static_cast<int>(channel.queued_samples.size());
 		const int frames_to_push = std::min(frames_available, queued_frames);
 		if (frames_to_push <= 0) {
-			if (frames_available > 0 && queued_frames == 0) {
+			if (playback_active && source_active && frames_available > 0 && queued_frames == 0) {
 				underrun_count += 1;
 			}
 			continue;

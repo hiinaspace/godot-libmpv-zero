@@ -34,11 +34,6 @@ void VkVideoOutput::_render_frame_on_render_thread_static(uint64_t p_self) {
 }
 
 void VkVideoOutput::_render_frame_on_render_thread() {
-	if (!render_thread_logged) {
-		UtilityFunctions::print("VkVideoOutput render-thread callback entered");
-		render_thread_logged = true;
-	}
-
 	if (!render_context || render_slot_index < 0 || render_slot_index >= static_cast<int>(slots.size())) {
 		last_render_result.store(0, std::memory_order_release);
 		render_request_in_flight.store(false, std::memory_order_release);
@@ -69,14 +64,13 @@ void VkVideoOutput::_render_frame_on_render_thread() {
 	};
 
 	const int render_result = dispatch.render(render_context, render_params);
-	if (!render_thread_logged || render_result < 0) {
+	if (render_result < 0) {
 		UtilityFunctions::print(vformat("VkVideoOutput render-thread result: %d", render_result));
 	}
 	if (render_result >= 0) {
 		slot.image_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 		slot.published = false;
 		last_rendered_slot.store(render_slot_index, std::memory_order_release);
-		successful_render_count.fetch_add(1, std::memory_order_acq_rel);
 	}
 	last_render_result.store(render_result, std::memory_order_release);
 	render_request_in_flight.store(false, std::memory_order_release);
@@ -337,7 +331,7 @@ void VkVideoOutput::update() {
 	if (render_thread_service->poll_external_texture_result(result)) {
 		texture_request_in_flight = false;
 		status = result.status;
-	if (!result.success) {
+		if (!result.success) {
 			if (probe_failed_callback.is_valid()) {
 				probe_failed_callback.call(status);
 			}
@@ -385,9 +379,6 @@ void VkVideoOutput::update() {
 
 	const int finished_slot = last_rendered_slot.exchange(-1, std::memory_order_acq_rel);
 	if (finished_slot >= 0 && finished_slot != published_slot_index) {
-		UtilityFunctions::print(vformat(
-				"VkVideoOutput publishing completed frame after %d update callbacks",
-				update_callback_count.load(std::memory_order_acquire)));
 		_publish_slot(finished_slot);
 	}
 
@@ -396,21 +387,7 @@ void VkVideoOutput::update() {
 	if ((update_flags & MPV_RENDER_UPDATE_FRAME) == 0 && forced_dirty && update_callback_count.load(std::memory_order_acquire) > 0) {
 		update_flags |= MPV_RENDER_UPDATE_FRAME;
 	}
-	if (!update_flags_logged) {
-		UtilityFunctions::print(vformat(
-				"VkVideoOutput update flags: %d forced_dirty=%d update_callbacks=%d",
-				static_cast<int>(update_flags),
-				forced_dirty ? 1 : 0,
-				update_callback_count.load(std::memory_order_acquire)));
-		update_flags_logged = true;
-	}
 	if ((update_flags & MPV_RENDER_UPDATE_FRAME) == 0) {
-		if (!update_callback_logged && update_callback_count.load(std::memory_order_acquire) > 0) {
-			UtilityFunctions::print(vformat(
-					"VkVideoOutput waiting for frame-ready flag after %d update callbacks",
-					update_callback_count.load(std::memory_order_acquire)));
-			update_callback_logged = true;
-		}
 		return;
 	}
 
@@ -443,10 +420,6 @@ void VkVideoOutput::update() {
 	}
 
 	rendering_server->call_on_render_thread(callable_mp_static(&VkVideoOutput::_render_frame_on_render_thread_static).bind(reinterpret_cast<uint64_t>(this)));
-	if (!render_queue_logged) {
-		UtilityFunctions::print("VkVideoOutput queued render-thread frame");
-		render_queue_logged = true;
-	}
 	status = vformat("queued Vulkan frame %dx%d", slots[render_slot_index].handle.width, slots[render_slot_index].handle.height);
 }
 
@@ -487,15 +460,8 @@ void VkVideoOutput::detach() {
 	texture_request_in_flight = false;
 	render_request_in_flight.store(false, std::memory_order_release);
 	last_render_result.store(0, std::memory_order_release);
-	successful_render_count.store(0, std::memory_order_release);
 	last_rendered_slot.store(-1, std::memory_order_release);
-	readback_logged = false;
-	render_queue_logged = false;
-	render_thread_logged = false;
 	update_callback_count.store(0, std::memory_order_release);
-	update_flags_logged = false;
-	forced_render_logged = false;
-	update_callback_logged = false;
 	published_slot_index = -1;
 	render_slot_index = -1;
 	status = "vulkan video backend detached";

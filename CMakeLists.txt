@@ -58,15 +58,11 @@ target_sources(${LIBNAME}
     src/video_output_backend.h
     src/render_thread_service.cpp
     src/render_thread_service.h
-    src/sw_video_output.cpp
-    src/sw_video_output.h
     src/vk_video_output.cpp
     src/vk_video_output.h
     src/mpv_player.cpp
     src/mpv_player.h
     src/mini_vulkan.h
-    src/phase0_texture_probe.cpp
-    src/phase0_texture_probe.h
 )
 
 # Fetch a list of the xml files to use for documentation and add to our target

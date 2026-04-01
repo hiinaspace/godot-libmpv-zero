@@ -24,6 +24,9 @@ public:
 	};
 
 	void reset();
+	void clear_queued_audio();
+	void set_source_active(bool p_active);
+	void set_playback_active(bool p_active);
 	void enqueue_interleaved_f32(const float *p_samples, int p_frame_count, int p_channel_count, int p_sample_rate);
 	void flush_to_playbacks();
 	bool consume_configuration_changed();
@@ -48,6 +51,8 @@ private:
 	int sample_rate = 48000;
 	bool configuration_changed = false;
 	int underrun_count = 0;
+	bool source_active = false;
+	bool playback_active = false;
 };
 
 } // namespace libmpv_zero

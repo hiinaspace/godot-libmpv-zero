@@ -1,8 +1,5 @@
 extends Node3D
 
-const USE_VULKAN_BACKEND := true
-const VIDEO_BACKEND_SOFTWARE := 0
-const VIDEO_BACKEND_VULKAN := 1
 const SPEAKER_OFFSETS := [
 	Vector3(-1.2, 0.0, 0.2),
 	Vector3(1.2, 0.0, 0.2),
@@ -10,11 +7,14 @@ const SPEAKER_OFFSETS := [
 
 var _audio_players: Array[AudioStreamPlayer3D] = []
 var _status_timer := 0.0
+var _awaiting_audio_drain := false
+var _audio_started := false
 var _player: MPVPlayer
 var _video_plane: MeshInstance3D
 var _video_material: StandardMaterial3D
 var _status_label: Label
 var _mpv_status_label: Label
+var _last_video_status := ""
 
 
 func _ready() -> void:
@@ -42,13 +42,25 @@ func _process(delta: float) -> void:
 		return
 	_status_timer = 0.0
 	var audio_diag: Dictionary = _player.get_audio_diagnostics()
-	print("example.gd video status: %s" % _player.get_video_status())
+	var video_status := _player.get_video_status()
+	if video_status != _last_video_status:
+		_last_video_status = video_status
+		print("example.gd video status: %s" % video_status)
 	print("example.gd audio diag: channels=%d queued=%d max=%d underruns=%d" % [
 		int(audio_diag.get("channel_count", 0)),
 		int(audio_diag.get("total_queued_frames", 0)),
 		int(audio_diag.get("max_queued_frames", 0)),
 		int(audio_diag.get("underrun_count", 0)),
 	])
+	if not _audio_started and int(audio_diag.get("max_queued_frames", 0)) >= 4800:
+		for audio_player in _audio_players:
+			audio_player.stream_paused = false
+		_audio_started = true
+	if _awaiting_audio_drain and int(audio_diag.get("total_queued_frames", 0)) == 0:
+		for audio_player in _audio_players:
+			audio_player.stop()
+		_awaiting_audio_drain = false
+		_audio_started = false
 
 
 func _create_world() -> void:
@@ -111,13 +123,13 @@ func _create_overlay() -> void:
 
 func _create_player() -> void:
 	_player = MPVPlayer.new()
-	_player.set_video_backend(VIDEO_BACKEND_VULKAN if USE_VULKAN_BACKEND else VIDEO_BACKEND_SOFTWARE)
 	add_child(_player)
 	_mpv_status_label.text = "mpv: %s" % _player.get_mpv_status()
 	print("example.gd mpv status: %s" % _player.get_mpv_status())
 
 	_player.audio_channels_changed.connect(_on_audio_channels_changed)
 	_player.video_size_changed.connect(_on_video_size_changed)
+	_player.texture_changed.connect(_on_texture_changed)
 	_player.file_loaded.connect(_on_file_loaded)
 	_player.playback_finished.connect(_on_playback_finished)
 
@@ -129,6 +141,8 @@ func _on_audio_channels_changed(count: int) -> void:
 	for audio_player in _audio_players:
 		audio_player.queue_free()
 	_audio_players.clear()
+	_audio_started = false
+	_awaiting_audio_drain = false
 
 	for i in range(count):
 		var audio_player := AudioStreamPlayer3D.new()
@@ -139,6 +153,7 @@ func _on_audio_channels_changed(count: int) -> void:
 		audio_player.max_distance = 12.0
 		audio_player.unit_size = 2.0
 		add_child(audio_player)
+		audio_player.stream_paused = true
 		audio_player.play()
 		var playback := audio_player.get_stream_playback()
 		if playback:
@@ -157,16 +172,18 @@ func _on_video_size_changed(width: int, height: int) -> void:
 			var aspect := float(width) / float(height)
 			quad.size = Vector2(2.4 * aspect, 2.4)
 
-	_video_material.albedo_texture = _player.get_texture()
-
-
 func _on_file_loaded() -> void:
 	_status_label.text = "mpv file loaded"
 	_mpv_status_label.text = "mpv: %s" % _player.get_mpv_status()
 	print("example.gd file_loaded signal")
 
 
+func _on_texture_changed() -> void:
+	_video_material.albedo_texture = _player.get_texture()
+
+
 func _on_playback_finished() -> void:
 	_status_label.text = "mpv playback finished"
 	_mpv_status_label.text = "mpv: %s" % _player.get_mpv_status()
+	_awaiting_audio_drain = true
 	print("example.gd playback_finished signal")

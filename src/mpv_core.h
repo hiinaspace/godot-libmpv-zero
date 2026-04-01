@@ -20,6 +20,7 @@ public:
 		bool playback_state_changed = false;
 		bool video_reconfigured = false;
 		bool audio_reconfigured = false;
+		bool eof_reached = false;
 		bool failed = false;
 		godot::String status;
 	};
@@ -62,6 +63,7 @@ private:
 	godot::String status = "mpv not initialized";
 	PlaybackState playback_state = PlaybackState::STOPPED;
 	bool file_loaded = false;
+	bool eof_reached = false;
 	int video_width = 0;
 	int video_height = 0;
 	VideoOutputMode video_output_mode = VideoOutputMode::LIBMPV;
