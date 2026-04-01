@@ -6,12 +6,14 @@ const SPEAKER_OFFSETS := [
 ]
 const VIDEO_DISTANCE := 2.5
 const VIDEO_DEPTH := 0.12
+const DEFAULT_MEDIA_SOURCE := "https://file.vrg.party/ichigoova01.m3u8"
 
 var _audio_players: Array[AudioStreamPlayer3D] = []
 var _video_faces: Array[MeshInstance3D] = []
 var _player: MPVPlayer
 var _video_root: Node3D
 var _video_material: StandardMaterial3D
+var _emissive_screen: MeshInstance3D
 var _xr_origin: XROrigin3D
 var _xr_camera: XRCamera3D
 var _media_source := ""
@@ -34,6 +36,7 @@ func _ready() -> void:
 	_media_source = _resolve_media_source()
 	_xr_origin = get_node_or_null("XROrigin3D")
 	_xr_camera = get_node_or_null("XROrigin3D/XRCamera3D")
+	_emissive_screen = get_node_or_null("EmissiveScreen")
 	if _xr_origin == null or _xr_camera == null:
 		push_error("example_vr.gd expects XROrigin3D/XRCamera3D in the scene.")
 		return
@@ -57,17 +60,35 @@ func _exit_tree() -> void:
 
 
 func _create_video_root() -> void:
-	_video_root = Node3D.new()
-	_video_root.name = "VideoRoot"
-	add_child(_video_root)
+	if _emissive_screen != null:
+		_video_root = _emissive_screen
+		_emissive_screen.gi_mode = GeometryInstance3D.GI_MODE_DYNAMIC
+	else:
+		_video_root = Node3D.new()
+		_video_root.name = "VideoRoot"
+		add_child(_video_root)
 
-	_video_material = StandardMaterial3D.new()
-	_video_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	_video_material.cull_mode = BaseMaterial3D.CULL_DISABLED
-	_video_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+	var base_material: StandardMaterial3D
+	if _emissive_screen != null:
+		base_material = _emissive_screen.get_active_material(0) as StandardMaterial3D
+		if base_material != null:
+			_video_material = base_material.duplicate() as StandardMaterial3D
+
+	if _video_material == null:
+		_video_material = StandardMaterial3D.new()
+		_video_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		_video_material.cull_mode = BaseMaterial3D.CULL_DISABLED
+		_video_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+		_video_material.emission_enabled = true
+		_video_material.emission = Color(1.0, 1.0, 1.0, 1.0)
+		_video_material.emission_energy_multiplier = 7.01
+
 	_video_material.albedo_texture_force_srgb = true
 
-	_rebuild_video_cube_faces(2.1, 1.2, VIDEO_DEPTH)
+	if _emissive_screen != null:
+		_emissive_screen.set_surface_override_material(0, _video_material)
+	else:
+		_rebuild_video_cube_faces(2.1, 1.2, VIDEO_DEPTH)
 
 
 func _create_player() -> void:
@@ -92,10 +113,15 @@ func _create_speakers() -> void:
 		var material := StandardMaterial3D.new()
 		material.albedo_color = Color(0.95, 0.45, 0.18) if i == 0 else Color(0.18, 0.65, 0.95)
 		marker.set_surface_override_material(0, material)
-		_video_root.add_child(marker)
+		if _emissive_screen != null:
+			add_child(marker)
+		else:
+			_video_root.add_child(marker)
 
 
 func _position_video_rig() -> void:
+	if _emissive_screen != null:
+		return
 	var camera_basis := _xr_camera.global_transform.basis
 	var camera_origin := _xr_camera.global_transform.origin
 	var forward := -camera_basis.z
@@ -118,7 +144,10 @@ func _on_audio_channels_changed(count: int) -> void:
 		var audio_player := _create_spatial_audio_player()
 		audio_player.name = "Speaker%d" % i
 		audio_player.position = SPEAKER_OFFSETS[min(i, SPEAKER_OFFSETS.size() - 1)]
-		_video_root.add_child(audio_player)
+		if _emissive_screen != null:
+			add_child(audio_player)
+		else:
+			_video_root.add_child(audio_player)
 		_configure_spatial_audio_player(audio_player)
 		_start_spatial_audio_player(audio_player, _player.get_audio_stream_for_channel(i))
 		_audio_players.append(audio_player)
@@ -126,13 +155,15 @@ func _on_audio_channels_changed(count: int) -> void:
 
 func _on_video_size_changed(width: int, height: int) -> void:
 	print("example_vr.gd video_size_changed: %dx%d" % [width, height])
-	if width > 0 and height > 0:
+	if width > 0 and height > 0 and _emissive_screen == null:
 		var aspect := float(width) / float(height)
 		_rebuild_video_cube_faces(1.8 * aspect, 1.8, VIDEO_DEPTH)
 
 
 func _on_texture_changed() -> void:
-	_video_material.albedo_texture = _player.get_texture()
+	var texture := _player.get_texture()
+	_video_material.albedo_texture = texture
+	_video_material.emission_texture = texture
 
 
 func _on_file_loaded() -> void:
@@ -156,7 +187,7 @@ func _resolve_media_source() -> String:
 		if not arg.begins_with("--"):
 			return _normalize_media_source(arg)
 
-	return ProjectSettings.globalize_path("https://file.vrg.party/ichigoova01.m3u8")
+	return ProjectSettings.globalize_path(DEFAULT_MEDIA_SOURCE)
 
 
 func _normalize_media_source(source: String) -> String:
@@ -175,7 +206,7 @@ func _normalize_media_source(source: String) -> String:
 
 
 func _rebuild_video_cube_faces(width: float, height: float, depth: float) -> void:
-	if _video_root == null:
+	if _video_root == null or _emissive_screen != null:
 		return
 
 	for face in _video_faces:

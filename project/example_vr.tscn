@@ -1,6 +1,7 @@
 [gd_scene format=3 uid="uid://dhtxqjfk33np4"]
 
 [ext_resource type="Script" uid="uid://btdd8iwwl45hs" path="res://example_vr.gd" id="1_e65hm"]
+[ext_resource type="Material" uid="uid://bh10b17iv2xfn" path="res://emissive_screen.tres" id="4_n5d2f"]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_7d1c2"]
 sky_horizon_color = Color(0.66224277, 0.6717428, 0.6867428, 1)
@@ -17,10 +18,36 @@ glow_enabled = true
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_7d1c2"]
 albedo_color = Color(0.09195144, 0.13902876, 0.020886086, 1)
+roughness = 0.22
 
 [sub_resource type="PlaneMesh" id="PlaneMesh_kp4wa"]
+lightmap_size_hint = Vector2i(140, 140)
 material = SubResource("StandardMaterial3D_7d1c2")
+add_uv2 = true
 size = Vector2(10, 10)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_kp4wa"]
+albedo_color = Color(0.43493083, 0.43547007, 0.7017172, 1)
+roughness = 0.53
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_sbaep"]
+lightmap_size_hint = Vector2i(17, 19)
+material = SubResource("StandardMaterial3D_kp4wa")
+add_uv2 = true
+
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_k1670"]
+lightmap_size_hint = Vector2i(17, 14)
+add_uv2 = true
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_n5d2f"]
+emission_enabled = true
+emission = Color(0.38039216, 1, 0.49411765, 1)
+emission_energy_multiplier = 16.0
+
+[sub_resource type="QuadMesh" id="QuadMesh_k1670"]
+lightmap_size_hint = Vector2i(22, 12)
+add_uv2 = true
+size = Vector2(4, 2)
 
 [node name="ExampleVr" type="Node3D" unique_id=1366149917]
 script = ExtResource("1_e65hm")
@@ -29,7 +56,9 @@ script = ExtResource("1_e65hm")
 environment = SubResource("Environment_sbaep")
 
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=1567441393]
-transform = Transform3D(-0.8660254, -0.43301278, 0.25, 0, 0.49999997, 0.86602545, -0.50000006, 0.75, -0.43301266, 0, 0, 0)
+transform = Transform3D(0.8566725, -0.44674844, 0.25793025, 2.7805946e-08, 0.49999994, 0.86602545, -0.5158607, -0.7419002, 0.4283362, 0, 0, 0)
+light_energy = 0.107
+light_indirect_energy = 0.47
 shadow_enabled = true
 
 [node name="XROrigin3D" type="XROrigin3D" parent="." unique_id=1380973053]
@@ -45,3 +74,55 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0)
 mesh = SubResource("PlaneMesh_kp4wa")
 
 [node name="SteamAudioConfig" type="SteamAudioConfig" parent="." unique_id=1737375145]
+
+[node name="Pillar" type="MeshInstance3D" parent="." unique_id=1414496404]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3, 0.5430664, 0)
+mesh = SubResource("CylinderMesh_sbaep")
+
+[node name="Pillar5" type="MeshInstance3D" parent="." unique_id=878981962]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3, 0.5430664, 0)
+mesh = SubResource("CylinderMesh_sbaep")
+
+[node name="Pillar8" type="MeshInstance3D" parent="." unique_id=259898957]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3, 0.5430664, -1.7946023)
+mesh = SubResource("CylinderMesh_sbaep")
+
+[node name="Pillar9" type="MeshInstance3D" parent="." unique_id=441286754]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3, 0.5430664, -1.7946023)
+mesh = SubResource("CylinderMesh_sbaep")
+
+[node name="Pillar2" type="MeshInstance3D" parent="." unique_id=1450870634]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3, 0.5430664, 1.7519002)
+mesh = SubResource("CylinderMesh_sbaep")
+
+[node name="Pillar6" type="MeshInstance3D" parent="." unique_id=1753817846]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3, 0.5430664, 1.7519002)
+mesh = SubResource("CylinderMesh_sbaep")
+
+[node name="Pillar3" type="MeshInstance3D" parent="." unique_id=822647150]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3, 0.5430664, 3.2316332)
+mesh = SubResource("CylinderMesh_sbaep")
+
+[node name="Pillar7" type="MeshInstance3D" parent="." unique_id=1439350146]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3, 0.5430664, 3.2316332)
+mesh = SubResource("CylinderMesh_sbaep")
+
+[node name="Pillar4" type="MeshInstance3D" parent="." unique_id=538035848]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3, 0.5430664, 3.2316332)
+mesh = SubResource("CylinderMesh_sbaep")
+
+[node name="glowingcapsule" type="MeshInstance3D" parent="." unique_id=2108471401]
+transform = Transform3D(1.244524, 0, 0, 0, 1.244524, 0, 0, 0, 1.244524, 0, 0.45664763, 3.7894435)
+gi_mode = 2
+mesh = SubResource("CapsuleMesh_k1670")
+surface_material_override/0 = SubResource("StandardMaterial3D_n5d2f")
+
+[node name="ReflectionProbe" type="ReflectionProbe" parent="." unique_id=559318361]
+size = Vector3(10, 5, 10)
+box_projection = true
+
+[node name="EmissiveScreen" type="MeshInstance3D" parent="." unique_id=663246320]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.724876, -2)
+gi_mode = 2
+mesh = SubResource("QuadMesh_k1670")
+surface_material_override/0 = ExtResource("4_n5d2f")
