@@ -6,6 +6,17 @@ namespace libmpv_zero {
 
 class MpvCore {
 public:
+	struct PollResult {
+		bool file_loaded = false;
+		bool playback_finished = false;
+		bool position_changed = false;
+		bool playback_state_changed = false;
+		bool video_reconfigured = false;
+		bool audio_reconfigured = false;
+		bool failed = false;
+		godot::String status;
+	};
+
 	enum class PlaybackState {
 		STOPPED,
 		PLAYING,
@@ -19,6 +30,7 @@ public:
 	void seek(double p_seconds);
 	bool initialize();
 	void shutdown();
+	PollResult poll();
 
 	const godot::String &get_loaded_path() const;
 	double get_time_pos() const;
@@ -35,6 +47,7 @@ private:
 	double duration = 0.0;
 	godot::String status = "mpv not initialized";
 	PlaybackState playback_state = PlaybackState::STOPPED;
+	bool file_loaded = false;
 };
 
 } // namespace libmpv_zero

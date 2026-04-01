@@ -59,9 +59,15 @@ void MPVPlayer::_ready() {
 			callable_mp(this, &MPVPlayer::_on_video_texture_ready),
 			callable_mp(this, &MPVPlayer::_on_video_probe_failed));
 	video_status = video_output_backend->get_status();
+	set_process(true);
+}
+
+void MPVPlayer::_process(double /*p_delta*/) {
+	_sync_mpv_state();
 }
 
 void MPVPlayer::_exit_tree() {
+	set_process(false);
 	if (mpv_core) {
 		mpv_core->shutdown();
 	}
@@ -73,7 +79,6 @@ void MPVPlayer::_exit_tree() {
 
 void MPVPlayer::load_file(const String &p_path) {
 	mpv_core->load_file(p_path);
-	emit_signal("file_loaded");
 }
 
 void MPVPlayer::play() {
@@ -86,13 +91,10 @@ void MPVPlayer::pause() {
 
 void MPVPlayer::stop() {
 	mpv_core->stop();
-	emit_signal("position_changed", mpv_core->get_time_pos());
-	emit_signal("playback_finished");
 }
 
 void MPVPlayer::seek(double p_seconds) {
 	mpv_core->seek(p_seconds);
-	emit_signal("position_changed", mpv_core->get_time_pos());
 }
 
 double MPVPlayer::get_time_pos() const {
@@ -144,4 +146,31 @@ void MPVPlayer::_on_video_texture_ready(const Ref<Texture2D> &p_texture) {
 void MPVPlayer::_on_video_probe_failed(const String &p_reason) {
 	video_status = p_reason;
 	UtilityFunctions::push_error("MPVPlayer video probe failed: " + p_reason);
+}
+
+void MPVPlayer::_sync_mpv_state() {
+	if (!mpv_core || !mpv_core->is_initialized()) {
+		return;
+	}
+
+	const libmpv_zero::MpvCore::PollResult poll_result = mpv_core->poll();
+
+	if (poll_result.file_loaded) {
+		emit_signal("file_loaded");
+	}
+	if (poll_result.position_changed) {
+		emit_signal("position_changed", mpv_core->get_time_pos());
+	}
+	if (poll_result.playback_finished) {
+		emit_signal("playback_finished");
+	}
+
+	const double duration = mpv_core->get_duration();
+	if (duration != last_known_duration) {
+		last_known_duration = duration;
+	}
+
+	if (poll_result.failed) {
+		UtilityFunctions::push_warning("MPVPlayer: " + poll_result.status);
+	}
 }

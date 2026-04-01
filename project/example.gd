@@ -32,3 +32,20 @@ func _ready() -> void:
 		rect.stretch_mode = TextureRect.STRETCH_SCALE
 		add_child(rect)
 	)
+
+	player.file_loaded.connect(func() -> void:
+		status_label.text = "mpv file loaded"
+		mpv_status_label.text = "mpv: %s" % player.get_mpv_status()
+		print("example.gd file_loaded signal")
+	)
+
+	player.playback_finished.connect(func() -> void:
+		status_label.text = "mpv playback finished"
+		mpv_status_label.text = "mpv: %s" % player.get_mpv_status()
+		print("example.gd playback_finished signal")
+	)
+
+	var smoke_test_path := ProjectSettings.globalize_path("res://smoke_test.ppm")
+	player.load_file(smoke_test_path)
+	player.play()
+	print("example.gd load_file issued: %s" % smoke_test_path)

@@ -22,18 +22,21 @@ class MPVPlayer : public Node {
 
 	void _on_video_texture_ready(const Ref<Texture2D> &p_texture);
 	void _on_video_probe_failed(const String &p_reason);
+	void _sync_mpv_state();
 
 	std::unique_ptr<libmpv_zero::MpvCore> mpv_core;
 	std::unique_ptr<libmpv_zero::AudioBridge> audio_bridge;
 	std::unique_ptr<libmpv_zero::VideoOutputBackend> video_output_backend;
 	Ref<Texture2D> video_texture;
 	String video_status = "idle";
+	double last_known_duration = 0.0;
 
 public:
 	MPVPlayer();
 	~MPVPlayer() override;
 
 	void _ready() override;
+	void _process(double p_delta) override;
 	void _exit_tree() override;
 
 	void load_file(const String &p_path);
