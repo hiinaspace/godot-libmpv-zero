@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 struct mpv_handle;
@@ -56,6 +57,18 @@ struct mpv_event {
 	void *data;
 };
 
+struct mpv_godot_audio_frame {
+	int format;
+	int samples;
+	int sample_rate;
+	int channels;
+	int64_t end_time_ns;
+	const void *data;
+	size_t size;
+};
+
+using mpv_godot_audio_callback_fn = void (*)(void *user_data, const mpv_godot_audio_frame *frame);
+
 using PFN_mpv_create = mpv_handle *(*)();
 using PFN_mpv_initialize = int (*)(mpv_handle *ctx);
 using PFN_mpv_terminate_destroy = void (*)(mpv_handle *ctx);
@@ -67,3 +80,4 @@ using PFN_mpv_get_property = int (*)(mpv_handle *ctx, const char *name, mpv_form
 using PFN_mpv_get_property_string = char *(*)(mpv_handle *ctx, const char *name);
 using PFN_mpv_free = void (*)(void *data);
 using PFN_mpv_wait_event = mpv_event *(*)(mpv_handle *ctx, double timeout);
+using PFN_mpv_godot_audio_set_callback = int (*)(mpv_handle *ctx, void *user_data, mpv_godot_audio_callback_fn cb);

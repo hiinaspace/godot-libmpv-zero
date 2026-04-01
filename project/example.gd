@@ -4,6 +4,14 @@ const USE_VULKAN_BACKEND := false
 const VIDEO_BACKEND_SOFTWARE := 0
 const VIDEO_BACKEND_VULKAN := 1
 
+var _audio_players: Array[AudioStreamPlayer] = []
+
+
+func _exit_tree() -> void:
+	for audio_player in _audio_players:
+		audio_player.queue_free()
+	_audio_players.clear()
+
 
 func _ready() -> void:
 	var status_label := Label.new()
@@ -32,6 +40,20 @@ func _ready() -> void:
 	player.audio_channels_changed.connect(func(count: int) -> void:
 		status_label.text = "Audio channels ready: %d" % count
 		mpv_status_label.text = "mpv: %s" % player.get_mpv_status()
+		for audio_player in _audio_players:
+			audio_player.queue_free()
+		_audio_players.clear()
+
+		for i in range(count):
+			var audio_player := AudioStreamPlayer.new()
+			audio_player.name = "SmokeAudio%d" % i
+			audio_player.stream = player.get_audio_stream_for_channel(i)
+			add_child(audio_player)
+			audio_player.play()
+			var playback := audio_player.get_stream_playback()
+			if playback:
+				player.attach_audio_playback(i, playback)
+				_audio_players.append(audio_player)
 	)
 
 	player.video_size_changed.connect(func(width: int, height: int) -> void:

@@ -31,6 +31,7 @@ struct MpvDispatch {
 	PFN_mpv_get_property_string get_property_string = nullptr;
 	PFN_mpv_free free_fn = nullptr;
 	PFN_mpv_wait_event wait_event = nullptr;
+	PFN_mpv_godot_audio_set_callback set_godot_audio_callback = nullptr;
 };
 
 MpvDispatch &get_dispatch() {
@@ -116,8 +117,10 @@ bool load_mpv_dispatch(String &r_error) {
 	const Char16String dll_path_utf16 = dll_path.utf16();
 	SetDllDirectoryW(reinterpret_cast<LPCWSTR>(dll_dir_utf16.get_data()));
 	dispatch.library = LoadLibraryW(reinterpret_cast<LPCWSTR>(dll_path_utf16.get_data()));
+	String loaded_from = dll_path;
 	if (!dispatch.library) {
 		dispatch.library = LoadLibraryW(L"libmpv-2.dll");
+		loaded_from = "PATH/libmpv-2.dll";
 	}
 	if (!dispatch.library) {
 		const DWORD error_code = GetLastError();
@@ -136,9 +139,44 @@ bool load_mpv_dispatch(String &r_error) {
 	dispatch.get_property_string = reinterpret_cast<PFN_mpv_get_property_string>(GetProcAddress(dispatch.library, "mpv_get_property_string"));
 	dispatch.free_fn = reinterpret_cast<PFN_mpv_free>(GetProcAddress(dispatch.library, "mpv_free"));
 	dispatch.wait_event = reinterpret_cast<PFN_mpv_wait_event>(GetProcAddress(dispatch.library, "mpv_wait_event"));
+	dispatch.set_godot_audio_callback = reinterpret_cast<PFN_mpv_godot_audio_set_callback>(GetProcAddress(dispatch.library, "mpv_godot_audio_set_callback"));
 
-	if (!dispatch.create || !dispatch.initialize || !dispatch.terminate_destroy || !dispatch.error_string || !dispatch.set_option_string || !dispatch.command || !dispatch.set_property_string || !dispatch.get_property || !dispatch.free_fn || !dispatch.wait_event) {
-		r_error = "failed to resolve required libmpv symbols";
+	if (!dispatch.create || !dispatch.initialize || !dispatch.terminate_destroy || !dispatch.error_string || !dispatch.set_option_string || !dispatch.command || !dispatch.set_property_string || !dispatch.get_property || !dispatch.free_fn || !dispatch.wait_event || !dispatch.set_godot_audio_callback) {
+		String missing;
+		if (!dispatch.create) {
+			missing += " mpv_create";
+		}
+		if (!dispatch.initialize) {
+			missing += " mpv_initialize";
+		}
+		if (!dispatch.terminate_destroy) {
+			missing += " mpv_terminate_destroy";
+		}
+		if (!dispatch.error_string) {
+			missing += " mpv_error_string";
+		}
+		if (!dispatch.set_option_string) {
+			missing += " mpv_set_option_string";
+		}
+		if (!dispatch.command) {
+			missing += " mpv_command";
+		}
+		if (!dispatch.set_property_string) {
+			missing += " mpv_set_property_string";
+		}
+		if (!dispatch.get_property) {
+			missing += " mpv_get_property";
+		}
+		if (!dispatch.free_fn) {
+			missing += " mpv_free";
+		}
+		if (!dispatch.wait_event) {
+			missing += " mpv_wait_event";
+		}
+		if (!dispatch.set_godot_audio_callback) {
+			missing += " mpv_godot_audio_set_callback";
+		}
+		r_error = "failed to resolve required libmpv symbols from " + loaded_from + ":" + missing;
 		FreeLibrary(dispatch.library);
 		dispatch = MpvDispatch();
 		return false;
@@ -162,6 +200,11 @@ void unload_mpv_dispatch() {
 }
 
 } // namespace
+
+void MpvCore::set_audio_callback(void *p_user_data, mpv_godot_audio_callback_fn p_callback) {
+	audio_callback_user_data = p_user_data;
+	audio_callback = p_callback;
+}
 
 bool MpvCore::initialize() {
 	if (initialized) {
@@ -188,8 +231,16 @@ bool MpvCore::initialize() {
 	dispatch.set_option_string(handle, "keep-open", "yes");
 	const char *video_output_name = video_output_mode == VideoOutputMode::LIBMPV ? "libmpv" : "null";
 	dispatch.set_option_string(handle, "vo", video_output_name);
-	dispatch.set_option_string(handle, "ao", "null");
+	dispatch.set_option_string(handle, "ao", "godot");
+	dispatch.set_option_string(handle, "audio-format", "float");
 	dispatch.set_option_string(handle, "pause", "yes");
+
+	if (dispatch.set_godot_audio_callback(handle, audio_callback_user_data, audio_callback) < 0) {
+		dispatch.terminate_destroy(handle);
+		handle = nullptr;
+		status = "failed to configure godot audio callback";
+		return false;
+	}
 
 	const int init_result = dispatch.initialize(handle);
 	if (init_result < 0) {

@@ -35,6 +35,7 @@ void MPVPlayer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_texture"), &MPVPlayer::get_texture);
 	ClassDB::bind_method(D_METHOD("get_audio_channel_count"), &MPVPlayer::get_audio_channel_count);
 	ClassDB::bind_method(D_METHOD("get_audio_stream_for_channel", "channel_index"), &MPVPlayer::get_audio_stream_for_channel);
+	ClassDB::bind_method(D_METHOD("attach_audio_playback", "channel_index", "playback"), &MPVPlayer::attach_audio_playback);
 	ClassDB::bind_method(D_METHOD("get_video_status"), &MPVPlayer::get_video_status);
 	ClassDB::bind_method(D_METHOD("get_mpv_status"), &MPVPlayer::get_mpv_status);
 	ClassDB::bind_method(D_METHOD("set_video_backend", "backend"), &MPVPlayer::set_video_backend);
@@ -53,9 +54,6 @@ void MPVPlayer::_bind_methods() {
 }
 
 void MPVPlayer::_ready() {
-	audio_bridge->configure_stereo_channels();
-	emit_signal("audio_channels_changed", audio_bridge->get_audio_channel_count());
-
 	_initialize_runtime();
 	set_process(true);
 }
@@ -116,6 +114,10 @@ int MPVPlayer::get_audio_channel_count() const {
 
 Ref<AudioStream> MPVPlayer::get_audio_stream_for_channel(int p_channel_index) const {
 	return audio_bridge->get_audio_stream_for_channel(p_channel_index);
+}
+
+void MPVPlayer::attach_audio_playback(int p_channel_index, const Ref<AudioStreamGeneratorPlayback> &p_playback) {
+	audio_bridge->set_channel_playback(p_channel_index, p_playback);
 }
 
 String MPVPlayer::get_video_status() const {
@@ -190,6 +192,7 @@ void MPVPlayer::_sync_mpv_state() {
 	}
 
 	const libmpv_zero::MpvCore::PollResult poll_result = mpv_core->poll();
+	audio_bridge->flush_to_playbacks();
 	if (video_output_backend) {
 		video_output_backend->update();
 		video_status = video_output_backend->get_status();
@@ -222,6 +225,9 @@ void MPVPlayer::_sync_mpv_state() {
 	if (poll_result.failed) {
 		UtilityFunctions::push_warning("MPVPlayer: " + poll_result.status);
 	}
+	if (audio_bridge->consume_configuration_changed()) {
+		emit_signal("audio_channels_changed", audio_bridge->get_audio_channel_count());
+	}
 }
 
 void MPVPlayer::_configure_mpv_core_for_backend() {
@@ -236,6 +242,8 @@ void MPVPlayer::_configure_mpv_core_for_backend() {
 
 bool MPVPlayer::_initialize_runtime() {
 	_configure_mpv_core_for_backend();
+	audio_bridge->reset();
+	mpv_core->set_audio_callback(audio_bridge.get(), &libmpv_zero::AudioBridge::mpv_audio_callback);
 
 	if (!mpv_core->initialize()) {
 		UtilityFunctions::push_warning("MPVPlayer: " + mpv_core->get_status());
@@ -262,6 +270,9 @@ void MPVPlayer::_shutdown_runtime() {
 	}
 	if (mpv_core) {
 		mpv_core->shutdown();
+	}
+	if (audio_bridge) {
+		audio_bridge->reset();
 	}
 }
 
