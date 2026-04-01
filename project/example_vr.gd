@@ -16,6 +16,7 @@ var _xr_origin: XROrigin3D
 var _xr_camera: XRCamera3D
 var _media_source := ""
 var xr_interface: XRInterface
+var _using_steam_audio := false
 
 func _ready() -> void:
 	xr_interface = XRServer.find_interface("OpenXR")
@@ -45,6 +46,7 @@ func _ready() -> void:
 	_player.load_file(_media_source)
 	_player.play()
 	print("example_vr.gd load_file issued: %s" % _media_source)
+	print("example_vr.gd spatial audio backend: %s" % ("SteamAudioPlayer" if _using_steam_audio else "AudioStreamPlayer3D"))
 
 
 func _exit_tree() -> void:
@@ -113,15 +115,12 @@ func _on_audio_channels_changed(count: int) -> void:
 	_audio_players.clear()
 
 	for i in range(count):
-		var audio_player := AudioStreamPlayer3D.new()
+		var audio_player := _create_spatial_audio_player()
 		audio_player.name = "Speaker%d" % i
-		audio_player.stream = _player.get_audio_stream_for_channel(i)
 		audio_player.position = SPEAKER_OFFSETS[min(i, SPEAKER_OFFSETS.size() - 1)]
-		audio_player.attenuation_model = AudioStreamPlayer3D.ATTENUATION_INVERSE_DISTANCE
-		audio_player.max_distance = 12.0
-		audio_player.unit_size = 2.0
 		_video_root.add_child(audio_player)
-		audio_player.play()
+		_configure_spatial_audio_player(audio_player)
+		_start_spatial_audio_player(audio_player, _player.get_audio_stream_for_channel(i))
 		_audio_players.append(audio_player)
 
 
@@ -157,7 +156,7 @@ func _resolve_media_source() -> String:
 		if not arg.begins_with("--"):
 			return _normalize_media_source(arg)
 
-	return ProjectSettings.globalize_path("res://smoke_test_lr_sync.mp4")
+	return ProjectSettings.globalize_path("https://file.vrg.party/ichigoova01.m3u8")
 
 
 func _normalize_media_source(source: String) -> String:
@@ -204,3 +203,36 @@ func _make_video_face(size: Vector2, position: Vector3, rotation_degrees: Vector
 	face.set_surface_override_material(0, _video_material)
 	_video_root.add_child(face)
 	return face
+
+
+func _create_spatial_audio_player() -> AudioStreamPlayer3D:
+	if ClassDB.class_exists("SteamAudioPlayer"):
+		var steam_player := ClassDB.instantiate("SteamAudioPlayer") as AudioStreamPlayer3D
+		if steam_player != null:
+			_using_steam_audio = true
+			return steam_player
+
+	_using_steam_audio = false
+	return AudioStreamPlayer3D.new()
+
+
+func _configure_spatial_audio_player(audio_player: AudioStreamPlayer3D) -> void:
+	audio_player.max_distance = 12.0
+	audio_player.unit_size = 2.0
+
+	if _using_steam_audio:
+		audio_player.set("distance_attenuation", true)
+		audio_player.set("min_attenuation_distance", 1.0)
+		audio_player.set("air_absorption", true)
+		audio_player.set("occlusion", false)
+		audio_player.set("reflection", false)
+	else:
+		audio_player.attenuation_model = AudioStreamPlayer3D.ATTENUATION_INVERSE_DISTANCE
+
+
+func _start_spatial_audio_player(audio_player: AudioStreamPlayer3D, stream: AudioStream) -> void:
+	if _using_steam_audio:
+		audio_player.call("play_stream", stream, 0.0, 0.0, 1.0)
+	else:
+		audio_player.stream = stream
+		audio_player.play()

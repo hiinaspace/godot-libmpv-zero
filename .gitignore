@@ -68,3 +68,4 @@ bin/windows/*
 !bin/windows/.gitkeep
 
 .claude
+project/addons/
