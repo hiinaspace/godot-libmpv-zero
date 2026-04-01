@@ -14,6 +14,7 @@ using mpv_render_update_fn = void (*)(void *cb_ctx);
 
 constexpr mpv_render_param_type MPV_RENDER_PARAM_INVALID = 0;
 constexpr mpv_render_param_type MPV_RENDER_PARAM_API_TYPE = 1;
+constexpr mpv_render_param_type MPV_RENDER_PARAM_BLOCK_FOR_TARGET_TIME = 12;
 constexpr mpv_render_param_type MPV_RENDER_PARAM_VULKAN_INIT_PARAMS = 21;
 constexpr mpv_render_param_type MPV_RENDER_PARAM_VULKAN_IMAGE = 22;
 constexpr mpv_render_param_type MPV_RENDER_PARAM_SW_SIZE = 17;

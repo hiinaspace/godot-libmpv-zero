@@ -48,6 +48,7 @@ void VkVideoOutput::_render_frame_on_render_thread() {
 	}
 
 	mpv_vulkan_image image = {};
+	int block_for_target_time = 0;
 	image.image = reinterpret_cast<VkImage>(slot.handle.image_handle);
 	image.width = static_cast<int>(slot.handle.width);
 	image.height = static_cast<int>(slot.handle.height);
@@ -59,6 +60,7 @@ void VkVideoOutput::_render_frame_on_render_thread() {
 	image.queue_family = slot.handle.queue_family_index;
 
 	mpv_render_param render_params[] = {
+		{ MPV_RENDER_PARAM_BLOCK_FOR_TARGET_TIME, &block_for_target_time },
 		{ MPV_RENDER_PARAM_VULKAN_IMAGE, &image },
 		{ MPV_RENDER_PARAM_INVALID, nullptr },
 	};
@@ -383,8 +385,12 @@ void VkVideoOutput::update() {
 	}
 
 	const bool forced_dirty = frame_dirty.exchange(false, std::memory_order_relaxed);
+	if (!forced_dirty) {
+		return;
+	}
+
 	uint64_t update_flags = dispatch.update(render_context);
-	if ((update_flags & MPV_RENDER_UPDATE_FRAME) == 0 && forced_dirty && update_callback_count.load(std::memory_order_acquire) > 0) {
+	if ((update_flags & MPV_RENDER_UPDATE_FRAME) == 0 && update_callback_count.load(std::memory_order_acquire) > 0) {
 		update_flags |= MPV_RENDER_UPDATE_FRAME;
 	}
 	if ((update_flags & MPV_RENDER_UPDATE_FRAME) == 0) {
