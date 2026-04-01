@@ -4,6 +4,7 @@
 #include "mpv_core.h"
 #include "sw_video_output.h"
 #include "video_output_backend.h"
+#include "vk_video_output.h"
 
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/callable_method_pointer.hpp>
@@ -13,13 +14,16 @@ using namespace godot;
 
 MPVPlayer::MPVPlayer() :
 		mpv_core(std::make_unique<libmpv_zero::MpvCore>()),
-		audio_bridge(std::make_unique<libmpv_zero::AudioBridge>()),
-		video_output_backend(std::make_unique<libmpv_zero::SwVideoOutput>()) {
+		audio_bridge(std::make_unique<libmpv_zero::AudioBridge>()) {
+	_recreate_video_output_backend();
 }
 
 MPVPlayer::~MPVPlayer() = default;
 
 void MPVPlayer::_bind_methods() {
+	BIND_ENUM_CONSTANT(VIDEO_BACKEND_SOFTWARE);
+	BIND_ENUM_CONSTANT(VIDEO_BACKEND_VULKAN);
+
 	ClassDB::bind_method(D_METHOD("load_file", "path"), &MPVPlayer::load_file);
 	ClassDB::bind_method(D_METHOD("play"), &MPVPlayer::play);
 	ClassDB::bind_method(D_METHOD("pause"), &MPVPlayer::pause);
@@ -33,6 +37,8 @@ void MPVPlayer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_audio_stream_for_channel", "channel_index"), &MPVPlayer::get_audio_stream_for_channel);
 	ClassDB::bind_method(D_METHOD("get_video_status"), &MPVPlayer::get_video_status);
 	ClassDB::bind_method(D_METHOD("get_mpv_status"), &MPVPlayer::get_mpv_status);
+	ClassDB::bind_method(D_METHOD("set_video_backend", "backend"), &MPVPlayer::set_video_backend);
+	ClassDB::bind_method(D_METHOD("get_video_backend"), &MPVPlayer::get_video_backend);
 
 	ADD_SIGNAL(MethodInfo("file_loaded"));
 	ADD_SIGNAL(MethodInfo("playback_finished"));
@@ -43,6 +49,7 @@ void MPVPlayer::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "texture", PROPERTY_HINT_RESOURCE_TYPE, "Texture2D"), "", "get_texture");
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "video_status"), "", "get_video_status");
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "mpv_status"), "", "get_mpv_status");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "video_backend", PROPERTY_HINT_ENUM, "Software,Vulkan"), "set_video_backend", "get_video_backend");
 }
 
 void MPVPlayer::_ready() {
@@ -54,12 +61,14 @@ void MPVPlayer::_ready() {
 	}
 	UtilityFunctions::print("MPVPlayer: ", mpv_core->get_status());
 
-	video_output_backend->attach(
-			this,
-			mpv_core.get(),
-			callable_mp(this, &MPVPlayer::_on_video_texture_ready),
-			callable_mp(this, &MPVPlayer::_on_video_probe_failed));
-	video_status = video_output_backend->get_status();
+	if (video_output_backend) {
+		video_output_backend->attach(
+				this,
+				mpv_core.get(),
+				callable_mp(this, &MPVPlayer::_on_video_texture_ready),
+				callable_mp(this, &MPVPlayer::_on_video_probe_failed));
+		video_status = video_output_backend->get_status();
+	}
 	set_process(true);
 }
 
@@ -138,6 +147,36 @@ String MPVPlayer::get_mpv_status() const {
 	return mpv_core ? mpv_core->get_status() : String("mpv unavailable");
 }
 
+void MPVPlayer::set_video_backend(int p_backend) {
+	const VideoBackendKind new_backend = p_backend == VIDEO_BACKEND_VULKAN ? VIDEO_BACKEND_VULKAN : VIDEO_BACKEND_SOFTWARE;
+	if (video_backend == new_backend) {
+		return;
+	}
+
+	if (is_inside_tree() && video_output_backend) {
+		video_output_backend->detach();
+	}
+
+	video_backend = new_backend;
+	video_texture.unref();
+	last_video_width = 0;
+	last_video_height = 0;
+	_recreate_video_output_backend();
+
+	if (is_inside_tree() && video_output_backend) {
+		video_output_backend->attach(
+				this,
+				mpv_core.get(),
+				callable_mp(this, &MPVPlayer::_on_video_texture_ready),
+				callable_mp(this, &MPVPlayer::_on_video_probe_failed));
+		video_status = video_output_backend->get_status();
+	}
+}
+
+int MPVPlayer::get_video_backend() const {
+	return video_backend;
+}
+
 void MPVPlayer::_on_video_texture_ready(const Ref<Texture2D> &p_texture) {
 	video_texture = p_texture;
 	video_status = "texture ready";
@@ -201,5 +240,19 @@ void MPVPlayer::_sync_mpv_state() {
 
 	if (poll_result.failed) {
 		UtilityFunctions::push_warning("MPVPlayer: " + poll_result.status);
+	}
+}
+
+void MPVPlayer::_recreate_video_output_backend() {
+	switch (video_backend) {
+		case VIDEO_BACKEND_VULKAN:
+			video_output_backend = std::make_unique<libmpv_zero::VkVideoOutput>();
+			video_status = "vulkan video backend selected";
+			break;
+		case VIDEO_BACKEND_SOFTWARE:
+		default:
+			video_output_backend = std::make_unique<libmpv_zero::SwVideoOutput>();
+			video_status = "software video backend selected";
+			break;
 	}
 }

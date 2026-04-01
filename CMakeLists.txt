@@ -55,6 +55,8 @@ target_sources(${LIBNAME}
     src/audio_bridge.cpp
     src/audio_bridge.h
     src/video_output_backend.h
+    src/render_thread_service.cpp
+    src/render_thread_service.h
     src/sw_video_output.cpp
     src/sw_video_output.h
     src/vk_video_output.cpp

@@ -1,10 +1,9 @@
 #pragma once
 
+#include "render_thread_service.h"
 #include "video_output_backend.h"
 
-namespace godot {
-class Phase0TextureProbe;
-}
+#include <godot_cpp/classes/texture2drd.hpp>
 
 namespace libmpv_zero {
 
@@ -17,8 +16,11 @@ public:
 	godot::String get_status() const override;
 
 private:
-	godot::Phase0TextureProbe *probe = nullptr;
-	godot::Node *owner = nullptr;
+	RenderThreadService *render_thread_service = nullptr;
+	godot::Ref<godot::Texture2DRD> texture;
+	RenderThreadService::ExternalTextureHandle external_texture;
+	godot::Callable texture_ready_callback;
+	godot::Callable probe_failed_callback;
 	godot::String status = "vulkan video backend idle";
 };
 

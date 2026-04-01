@@ -1,5 +1,9 @@
 extends Control
 
+const USE_VULKAN_BACKEND := false
+const VIDEO_BACKEND_SOFTWARE := 0
+const VIDEO_BACKEND_VULKAN := 1
+
 
 func _ready() -> void:
 	var status_label := Label.new()
@@ -20,6 +24,7 @@ func _ready() -> void:
 	add_child(rect)
 
 	var player := MPVPlayer.new()
+	player.set_video_backend(VIDEO_BACKEND_VULKAN if USE_VULKAN_BACKEND else VIDEO_BACKEND_SOFTWARE)
 	add_child(player)
 	mpv_status_label.text = "mpv: %s" % player.get_mpv_status()
 	print("example.gd mpv status: %s" % player.get_mpv_status())

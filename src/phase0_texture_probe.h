@@ -1,11 +1,10 @@
 #pragma once
 
-#include <mutex>
+#include "render_thread_service.h"
 
 #include <godot_cpp/classes/node.hpp>
-#include <godot_cpp/classes/texture2drd.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
-#include <godot_cpp/variant/rid.hpp>
+#include <godot_cpp/classes/texture2drd.hpp>
 #include <godot_cpp/variant/string.hpp>
 
 namespace godot {
@@ -13,35 +12,15 @@ namespace godot {
 class Phase0TextureProbe : public Node {
 	GDCLASS(Phase0TextureProbe, Node)
 
-	struct PendingPublish {
-		bool ready = false;
-		bool success = false;
-		RID wrapped_texture;
-		uint64_t logical_device = 0;
-		uint64_t image_handle = 0;
-		uint64_t image_memory_handle = 0;
-		String status;
-	};
-
 	static void _bind_methods();
 
 	void _publish_pending_result();
-	void _create_probe_texture_on_render_thread();
-	void _cleanup_render_resources_on_render_thread();
-
-	std::mutex pending_mutex;
-	PendingPublish pending_publish;
 
 	Ref<Texture2DRD> published_texture;
-	RID wrapped_texture_rid;
-
-	bool probe_requested = false;
-	bool cleanup_requested = false;
+	libmpv_zero::RenderThreadService *render_thread_service = nullptr;
+	libmpv_zero::RenderThreadService::ExternalTextureHandle external_texture;
 	uint32_t probe_width = 256;
 	uint32_t probe_height = 256;
-	uint64_t logical_device_handle = 0;
-	uint64_t image_handle = 0;
-	uint64_t image_memory_handle = 0;
 	String status = "idle";
 
 public:
