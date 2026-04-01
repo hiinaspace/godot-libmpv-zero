@@ -41,8 +41,12 @@ void Phase0TextureProbe::_exit_tree() {
 	}
 	if (render_thread_service) {
 		render_thread_service->release_external_texture(external_texture);
-		memdelete(render_thread_service);
-		render_thread_service = nullptr;
+		if (render_thread_service->has_pending_work()) {
+			render_thread_service = nullptr;
+		} else {
+			memdelete(render_thread_service);
+			render_thread_service = nullptr;
+		}
 	}
 	external_texture = libmpv_zero::RenderThreadService::ExternalTextureHandle();
 }

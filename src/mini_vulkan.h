@@ -20,6 +20,7 @@ using VkFormat = uint32_t;
 using VkImageTiling = uint32_t;
 using VkImageLayout = uint32_t;
 using VkImageUsageFlags = VkFlags;
+using VkImageAspectFlags = VkFlags;
 using VkImageCreateFlags = VkFlags;
 using VkSampleCountFlagBits = uint32_t;
 using VkSampleCountFlags = VkFlags;
@@ -95,7 +96,7 @@ struct VkPhysicalDeviceMemoryProperties {
 	VkMemoryHeap memoryHeaps[16];
 };
 
-using PFN_vkVoidFunction = void (VKAPI_PTR *)(void);
+using PFN_vkVoidFunction = void(VKAPI_PTR *)(void);
 using PFN_vkGetInstanceProcAddr = PFN_vkVoidFunction(VKAPI_PTR *)(VkInstance p_instance, const char *p_name);
 using PFN_vkGetDeviceProcAddr = PFN_vkVoidFunction(VKAPI_PTR *)(VkDevice p_device, const char *p_name);
 using PFN_vkGetPhysicalDeviceMemoryProperties = void(VKAPI_PTR *)(VkPhysicalDevice p_physical_device, VkPhysicalDeviceMemoryProperties *p_memory_properties);
@@ -112,6 +113,9 @@ constexpr VkStructureType VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO = 5;
 constexpr VkStructureType VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO = 14;
 
 constexpr VkImageLayout VK_IMAGE_LAYOUT_UNDEFINED = 0;
+constexpr VkImageLayout VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL = 5;
+
+constexpr VkImageAspectFlags VK_IMAGE_ASPECT_COLOR_BIT = 0x00000001;
 
 constexpr VkFormat VK_FORMAT_R8G8B8A8_UNORM = 37;
 

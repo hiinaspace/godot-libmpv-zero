@@ -69,10 +69,24 @@ void MPVPlayer::_exit_tree() {
 }
 
 void MPVPlayer::load_file(const String &p_path) {
+	if (video_output_backend && !video_output_backend->is_ready_for_playback()) {
+		pending_load_path = p_path;
+		video_status = "waiting for video backend";
+		return;
+	}
+
+	pending_load_path = "";
+	pending_play = false;
 	mpv_core->load_file(p_path);
 }
 
 void MPVPlayer::play() {
+	if (video_output_backend && !video_output_backend->is_ready_for_playback()) {
+		pending_play = true;
+		video_status = "waiting for video backend";
+		return;
+	}
+
 	mpv_core->play();
 }
 
@@ -143,6 +157,8 @@ void MPVPlayer::set_video_backend(int p_backend) {
 	last_video_width = 0;
 	last_video_height = 0;
 	last_known_duration = 0.0;
+	pending_load_path = "";
+	pending_play = false;
 
 	if (is_inside_tree()) {
 		_shutdown_runtime();
@@ -197,6 +213,21 @@ void MPVPlayer::_sync_mpv_state() {
 		video_output_backend->update();
 		video_status = video_output_backend->get_status();
 	}
+	if (video_output_backend && video_output_backend->is_ready_for_playback()) {
+		if (!pending_load_path.is_empty()) {
+			const String deferred_path = pending_load_path;
+			const bool deferred_play = pending_play;
+			pending_load_path = "";
+			pending_play = false;
+			mpv_core->load_file(deferred_path);
+			if (deferred_play) {
+				mpv_core->play();
+			}
+		} else if (pending_play) {
+			pending_play = false;
+			mpv_core->play();
+		}
+	}
 
 	if (poll_result.file_loaded) {
 		emit_signal("file_loaded");
@@ -235,8 +266,7 @@ void MPVPlayer::_configure_mpv_core_for_backend() {
 		return;
 	}
 
-	const libmpv_zero::MpvCore::VideoOutputMode output_mode =
-			video_backend == VIDEO_BACKEND_VULKAN ? libmpv_zero::MpvCore::VideoOutputMode::NULL_OUTPUT : libmpv_zero::MpvCore::VideoOutputMode::LIBMPV;
+	const libmpv_zero::MpvCore::VideoOutputMode output_mode = libmpv_zero::MpvCore::VideoOutputMode::LIBMPV;
 	mpv_core->set_video_output_mode(output_mode);
 }
 
@@ -268,6 +298,8 @@ void MPVPlayer::_shutdown_runtime() {
 	if (video_output_backend) {
 		video_output_backend->detach();
 	}
+	pending_load_path = "";
+	pending_play = false;
 	if (mpv_core) {
 		mpv_core->shutdown();
 	}

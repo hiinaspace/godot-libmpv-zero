@@ -41,6 +41,8 @@ private:
 	std::unique_ptr<libmpv_zero::VideoOutputBackend> video_output_backend;
 	Ref<Texture2D> video_texture;
 	String video_status = "idle";
+	String pending_load_path;
+	bool pending_play = false;
 	double last_known_duration = 0.0;
 	int last_video_width = 0;
 	int last_video_height = 0;

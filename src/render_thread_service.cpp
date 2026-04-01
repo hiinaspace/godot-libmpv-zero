@@ -120,7 +120,7 @@ void vk_destroy_external_image(const VulkanDispatch &p_dispatch, VkDevice p_devi
 void RenderThreadService::_bind_methods() {
 }
 
-bool RenderThreadService::request_external_texture(uint32_t p_width, uint32_t p_height, const Color &p_clear_color) {
+bool RenderThreadService::request_external_texture(uint32_t p_width, uint32_t p_height, const Color &p_clear_color, bool p_clear_texture) {
 	RenderingServer *rendering_server = RenderingServer::get_singleton();
 	ERR_FAIL_NULL_V(rendering_server, false);
 
@@ -135,6 +135,7 @@ bool RenderThreadService::request_external_texture(uint32_t p_width, uint32_t p_
 		create_request.width = p_width;
 		create_request.height = p_height;
 		create_request.clear_color = p_clear_color;
+		create_request.clear_texture = p_clear_texture;
 	}
 
 	status = "queued external texture request";
@@ -180,6 +181,11 @@ void RenderThreadService::release_external_texture(const ExternalTextureHandle &
 	rendering_server->call_on_render_thread(callable_mp(this, &RenderThreadService::_release_external_texture_on_render_thread));
 }
 
+bool RenderThreadService::has_pending_work() const {
+	std::lock_guard<std::mutex> lock(mutex);
+	return create_request.active || release_request.active;
+}
+
 String RenderThreadService::get_status() const {
 	std::lock_guard<std::mutex> lock(mutex);
 	return status;
@@ -217,12 +223,15 @@ void RenderThreadService::_create_external_texture_on_render_thread() {
 	const BitField<RenderingDevice::TextureUsageBits> usage_bits =
 			RenderingDevice::TEXTURE_USAGE_SAMPLING_BIT |
 			RenderingDevice::TEXTURE_USAGE_COLOR_ATTACHMENT_BIT |
+			RenderingDevice::TEXTURE_USAGE_CAN_COPY_FROM_BIT |
 			RenderingDevice::TEXTURE_USAGE_CAN_COPY_TO_BIT;
 
 	VkInstance instance = reinterpret_cast<VkInstance>(rendering_device->get_driver_resource(RenderingDevice::DRIVER_RESOURCE_VULKAN_INSTANCE, RID(), 0));
 	VkPhysicalDevice physical_device = reinterpret_cast<VkPhysicalDevice>(rendering_device->get_driver_resource(RenderingDevice::DRIVER_RESOURCE_VULKAN_PHYSICAL_DEVICE, RID(), 0));
 	VkDevice device = reinterpret_cast<VkDevice>(rendering_device->get_driver_resource(RenderingDevice::DRIVER_RESOURCE_VULKAN_DEVICE, RID(), 0));
-	if (!instance || !physical_device || !device) {
+	VkQueue queue = reinterpret_cast<VkQueue>(rendering_device->get_driver_resource(RenderingDevice::DRIVER_RESOURCE_VULKAN_QUEUE, RID(), 0));
+	const uint32_t queue_family_index = static_cast<uint32_t>(rendering_device->get_driver_resource(RenderingDevice::DRIVER_RESOURCE_VULKAN_QUEUE_FAMILY_INDEX, RID(), 0));
+	if (!instance || !physical_device || !device || !queue) {
 		result.status = "failed to query Godot Vulkan handles";
 		std::lock_guard<std::mutex> lock(mutex);
 		pending_result = result;
@@ -308,7 +317,11 @@ void RenderThreadService::_create_external_texture_on_render_thread() {
 		return;
 	}
 
+	result.instance_handle = reinterpret_cast<uint64_t>(instance);
+	result.physical_device_handle = reinterpret_cast<uint64_t>(physical_device);
 	result.logical_device = reinterpret_cast<uint64_t>(device);
+	result.queue_handle = reinterpret_cast<uint64_t>(queue);
+	result.queue_family_index = queue_family_index;
 	result.image_handle = reinterpret_cast<uint64_t>(image);
 	result.image_memory_handle = reinterpret_cast<uint64_t>(image_memory);
 
@@ -332,16 +345,18 @@ void RenderThreadService::_create_external_texture_on_render_thread() {
 		return;
 	}
 
-	const Error clear_error = rendering_device->texture_clear(result.wrapped_texture, request.clear_color, 0, 1, 0, 1);
-	if (clear_error != OK) {
-		rendering_device->free_rid(result.wrapped_texture);
-		result.wrapped_texture = RID();
-		vk_destroy_external_image(dispatch, device, image, image_memory);
-		vk_unload_dispatch(dispatch);
-		result.status = "failed to clear wrapped external texture";
-		std::lock_guard<std::mutex> lock(mutex);
-		pending_result = result;
-		return;
+	if (request.clear_texture) {
+		const Error clear_error = rendering_device->texture_clear(result.wrapped_texture, request.clear_color, 0, 1, 0, 1);
+		if (clear_error != OK) {
+			rendering_device->free_rid(result.wrapped_texture);
+			result.wrapped_texture = RID();
+			vk_destroy_external_image(dispatch, device, image, image_memory);
+			vk_unload_dispatch(dispatch);
+			result.status = "failed to clear wrapped external texture";
+			std::lock_guard<std::mutex> lock(mutex);
+			pending_result = result;
+			return;
+		}
 	}
 
 	vk_unload_dispatch(dispatch);
