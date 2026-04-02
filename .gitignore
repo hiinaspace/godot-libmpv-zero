@@ -17,6 +17,7 @@ project/bin/macos/*
 project/bin/windows/*
 !project/bin/windows/.gitkeep
 !project/bin/*.gdextension
+!project/bin/*.uid
 .sconsign*.dblite
 
 # Ignore custom.py

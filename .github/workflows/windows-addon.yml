@@ -58,13 +58,23 @@ jobs:
         run: |
           & "C:\Program Files\CMake\bin\cmake.exe" --build build-ci --config Debug
 
+      - name: Assemble addon bundle
+        shell: pwsh
+        run: |
+          $bundleRoot = Join-Path $PWD "release-bundle"
+          $addonRoot = Join-Path $bundleRoot "addons\libmpv_zero\bin"
+          $addonWindows = Join-Path $addonRoot "windows"
+          New-Item -ItemType Directory -Force -Path $addonWindows | Out-Null
+          Copy-Item -LiteralPath ".\project\bin\libmpv_zero.gdextension" -Destination (Join-Path $addonRoot "libmpv_zero.gdextension") -Force
+          Get-ChildItem ".\project\bin\windows" -File | ForEach-Object {
+            Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $addonWindows $_.Name) -Force
+          }
+          Copy-Item -LiteralPath ".\README.md" -Destination (Join-Path $bundleRoot "README.md") -Force
+
       - name: Upload addon artifact
         uses: actions/upload-artifact@v4
         with:
           name: libmpv-zero-windows-debug
           path: |
-            project/bin/**
-            project/project.godot
-            project/*.tscn
-            project/*.gd
+            release-bundle/**
           if-no-files-found: error

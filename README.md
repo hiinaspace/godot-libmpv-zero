@@ -1,56 +1,77 @@
-# godot-cpp template
-This repository serves as a quickstart template for GDExtension development with Godot 4.0+.
+# godot-libmpv-zero
 
-## Contents
-* Preconfigured source files for C++ development of the GDExtension ([src/](./src/))
-* An empty Godot project in [project/](./project), to test the GDExtension
-* godot-cpp as a submodule (`godot-cpp/`)
-* GitHub Issues template ([.github/ISSUE_TEMPLATE.yml](./.github/ISSUE_TEMPLATE.yml))
-* GitHub CI/CD workflows to publish your library packages when creating a release ([.github/workflows/builds.yml](./.github/workflows/builds.yml))
-* An SConstruct file with various functions, such as boilerplate for [Adding documentation](https://docs.godotengine.org/en/stable/tutorials/scripting/cpp/gdextension_docs_system.html)
+Experimental Godot 4 GDExtension for `libmpv`-backed video playback with:
 
-## Usage - Template
+- Vulkan external-image video rendering
+- forked `libmpv` audio callback support
+- per-channel Godot `AudioStream` playback
+- VR/OpenXR sample scenes
+- Steam Audio validation in the sample project
 
-To use this template, log in to GitHub and click the green "Use this template" button at the top of the repository page. This will let you create a copy of this repository with a clean git history.
+## Repository layout
 
-To get started with your new GDExtension, do the following:
+- [src/](/S:/code/godot-libmpv-zero/src): GDExtension source
+- [project/](/S:/code/godot-libmpv-zero/project): sample Godot project used for local validation
+- [project/bin/libmpv_zero.gdextension](/S:/code/godot-libmpv-zero/project/bin/libmpv_zero.gdextension): extension descriptor
+- [PLAN.md](/S:/code/godot-libmpv-zero/PLAN.md): project plan and implementation notes
+- [CHARTER.md](/S:/code/godot-libmpv-zero/CHARTER.md): project goals and constraints
 
-* clone your repository to your local computer
-* initialize the godot-cpp git submodule via `git submodule update --init`
-* change the name of the compiled library file inside the [SConstruct](./SConstruct) file by modifying the `libname` string.
-  * change the paths of the to be loaded library name inside the [project/bin/example.gdextension](./project/bin/example.gdextension) file, by replacing `EXTENSION-NAME` with the name you chose for `libname`.
-* change the `entry_symbol` string inside [project/bin/example.gdextension](./project/bin/example.gdextension) file.
-  * rename the `example_library_init` function in [src/register_types.cpp](./src/register_types.cpp) to the same name you chose for `entry_symbol`.
-* change the name of the `project/bin/example.gdextension` file
+## Local build
 
-Now, you can build the project with the following command:
+Requirements:
 
-```shell
-scons
+- Visual Studio 2022 with MSVC toolchain
+- CMake
+- `gh` authenticated if you want to pull CI-built `mpv` artifacts
+- `godot-cpp` submodule initialized
+
+Stage the current Windows `mpv` package from GitHub Actions:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\setup_windows_mpv_dev.ps1
 ```
 
-If the build command worked, you can test it with the [project](./project) project. Import it into Godot, open it, and launch the main scene. You should see it print the following line in the console:
+Or stage a local MSYS2 build of the forked `mpv` tree:
 
-```
-Type: 24
-```
-
-### Configuring an IDE
-You can develop your own extension with any text editor and by invoking scons on the command line, but if you want to work with an IDE (Integrated Development Environment), you can use a compilation database file called `compile_commands.json`. Most IDEs should automatically identify this file, and self-configure appropriately.
-To generate the database file, you can run one of the following commands in the project root directory:
-```shell
-# Generate compile_commands.json while compiling
-scons compiledb=yes
-
-# Generate compile_commands.json without compiling
-scons compiledb=yes compile_commands.json
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\build_mpv_local.ps1
 ```
 
-## Usage - Actions
+Build the extension:
 
-This repository comes with continuous integration (CI) through a GitHub action that tests building the GDExtension.
-It triggers automatically for each pushed change. You can find and edit it in [builds.yml](.github/workflows/ci.yml).
+```powershell
+& "C:\Program Files\CMake\bin\cmake.exe" -S . -B build-phase0 -DMPV_DIR="$PWD\dependencies\mpv-dev"
+& "C:\Program Files\CMake\bin\cmake.exe" --build build-phase0 --config Debug
+```
 
-There is also a workflow ([make_build.yml](.github/workflows/make_build.yml)) that builds the GDExtension for all supported platforms that you can use to create releases.
-You can trigger this workflow manually from the `Actions` tab on GitHub.
-After it is complete, you can find the file `godot-cpp-template.zip` in the `Artifacts` section of the workflow run.
+The built DLL and staged runtime land under [project/bin/windows](/S:/code/godot-libmpv-zero/project/bin/windows).
+
+## Sample run
+
+Console runner:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\run_sample_console.ps1 -ShowFiltered
+```
+
+Use a custom media source:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\run_sample_console.ps1 -MediaSource "https://example.com/video.mp4" -ShowFiltered
+```
+
+## GitHub Actions
+
+- [windows-addon.yml](/S:/code/godot-libmpv-zero/.github/workflows/windows-addon.yml) builds the Windows addon against staged `mpv` artifacts from the forked `mpv-winbuild-cmake` workflow.
+- The workflow artifact is intended to be a reusable addon bundle, not just the raw sample project output.
+
+## Status
+
+Current prototype milestones already validated locally:
+
+- stable Vulkan video playback in Godot
+- stable audio playback without xruns on tested media
+- VR sample playback through OpenXR
+- Steam Audio spatialization with per-channel playback
+
+This is still prototype software. Packaging, API cleanup, and release polish are still in progress.
