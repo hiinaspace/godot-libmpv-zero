@@ -4,6 +4,7 @@ param(
     [long]$RunId = 0,
     [string]$ArtifactRuntime = "mpv-x86_64",
     [string]$ArtifactDev = "mpv-dev-x86_64",
+    [string]$Branch = "master",
     [string]$StageDir = ""
 )
 
@@ -15,11 +16,16 @@ function Get-LatestRunWithArtifacts {
         [string]$Repository,
         [string]$Workflow,
         [string]$RuntimeArtifact,
-        [string]$DevArtifact
+        [string]$DevArtifact,
+        [string]$HeadBranch
     )
 
-    $json = gh run list -R $Repository --workflow $Workflow --limit 20 --json databaseId,status | ConvertFrom-Json
-    $completedRuns = $json | Where-Object { $_.status -eq "completed" }
+    $json = gh run list -R $Repository --workflow $Workflow --branch $HeadBranch --limit 20 --json databaseId,status,conclusion,headBranch | ConvertFrom-Json
+    $completedRuns = $json | Where-Object {
+        $_.status -eq "completed" -and
+        $_.conclusion -eq "success" -and
+        $_.headBranch -eq $HeadBranch
+    }
     foreach ($run in $completedRuns) {
         $artifacts = Get-ArtifactMap -Repository $Repository -WorkflowRunId ([long]$run.databaseId)
         if ($artifacts.ContainsKey($RuntimeArtifact) -and $artifacts.ContainsKey($DevArtifact)) {
@@ -27,7 +33,7 @@ function Get-LatestRunWithArtifacts {
         }
     }
 
-    throw "No completed runs with '$RuntimeArtifact' and '$DevArtifact' artifacts found for workflow '$Workflow' in '$Repository'"
+    throw "No successful runs with '$RuntimeArtifact' and '$DevArtifact' artifacts found for workflow '$Workflow' on branch '$HeadBranch' in '$Repository'"
 }
 
 function Get-ArtifactMap {
@@ -82,7 +88,7 @@ if ([string]::IsNullOrWhiteSpace($StageDir)) {
 }
 
 if ($RunId -le 0) {
-    $RunId = Get-LatestRunWithArtifacts -Repository $Repo -Workflow $WorkflowName -RuntimeArtifact $ArtifactRuntime -DevArtifact $ArtifactDev
+    $RunId = Get-LatestRunWithArtifacts -Repository $Repo -Workflow $WorkflowName -RuntimeArtifact $ArtifactRuntime -DevArtifact $ArtifactDev -HeadBranch $Branch
 }
 
 $artifactMap = Get-ArtifactMap -Repository $Repo -WorkflowRunId $RunId

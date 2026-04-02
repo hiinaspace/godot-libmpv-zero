@@ -31,6 +31,8 @@ Stage the current Windows `mpv` package from GitHub Actions:
 powershell -ExecutionPolicy Bypass -File .\tools\setup_windows_mpv_dev.ps1
 ```
 
+By default, this stages the latest successful `master` run from the forked `mpv clang` workflow in `hiinaspace/mpv-winbuild-cmake`. You can still override the run explicitly with `-RunId`.
+
 Or stage a local MSYS2 build of the forked `mpv` tree:
 
 ```powershell
