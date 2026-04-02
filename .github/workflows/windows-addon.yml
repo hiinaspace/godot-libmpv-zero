@@ -3,6 +3,10 @@ name: Build Windows Addon
 on:
   workflow_dispatch:
     inputs:
+      release_tag:
+        description: "Optional release tag for publishing this build"
+        required: false
+        type: string
       mpv_run_id:
         description: "mpv-winbuild-cmake run id to consume (optional)"
         required: false
@@ -14,7 +18,7 @@ on:
         type: string
 
 permissions:
-  contents: read
+  contents: write
   actions: read
 
 jobs:
@@ -48,15 +52,25 @@ jobs:
           }
           powershell -ExecutionPolicy Bypass -File .\tools\setup_windows_mpv_dev.ps1 @args
 
-      - name: Configure
+      - name: Configure Debug
         shell: pwsh
         run: |
-          & "C:\Program Files\CMake\bin\cmake.exe" -S . -B build-ci -DMPV_DIR="${{ github.workspace }}\dependencies\mpv-dev"
+          & "C:\Program Files\CMake\bin\cmake.exe" -S . -B build-ci-debug -DMPV_DIR="${{ github.workspace }}\dependencies\mpv-dev" -DGODOTCPP_TARGET=template_debug
 
-      - name: Build
+      - name: Build Debug
         shell: pwsh
         run: |
-          & "C:\Program Files\CMake\bin\cmake.exe" --build build-ci --config Debug
+          & "C:\Program Files\CMake\bin\cmake.exe" --build build-ci-debug --config Debug
+
+      - name: Configure Release
+        shell: pwsh
+        run: |
+          & "C:\Program Files\CMake\bin\cmake.exe" -S . -B build-ci-release -DMPV_DIR="${{ github.workspace }}\dependencies\mpv-dev" -DGODOTCPP_TARGET=template_release
+
+      - name: Build Release
+        shell: pwsh
+        run: |
+          & "C:\Program Files\CMake\bin\cmake.exe" --build build-ci-release --config Release
 
       - name: Assemble addon bundle
         shell: pwsh
@@ -70,11 +84,22 @@ jobs:
             Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $addonWindows $_.Name) -Force
           }
           Copy-Item -LiteralPath ".\README.md" -Destination (Join-Path $bundleRoot "README.md") -Force
+          Compress-Archive -Path (Join-Path $bundleRoot "*") -DestinationPath (Join-Path $PWD "libmpv-zero-windows-x86_64.zip") -Force
 
       - name: Upload addon artifact
         uses: actions/upload-artifact@v4
         with:
-          name: libmpv-zero-windows-debug
+          name: libmpv-zero-windows-x86_64
           path: |
-            release-bundle/**
+            libmpv-zero-windows-x86_64.zip
           if-no-files-found: error
+
+      - name: Publish GitHub release
+        if: ${{ inputs.release_tag != '' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.release_tag }}
+          prerelease: true
+          generate_release_notes: true
+          files: |
+            libmpv-zero-windows-x86_64.zip
