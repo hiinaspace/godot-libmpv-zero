@@ -7,7 +7,7 @@ endif()
 
 set(LIBNAME "libmpv_zero")
 set(GODOT_PROJECT_DIR "project" CACHE STRING "The directory of a Godot project folder")
-set(MPV_DIR "${CMAKE_CURRENT_LIST_DIR}/dependencies/mpv-local" CACHE PATH "Path to a staged libmpv development package")
+set(MPV_DIR "${CMAKE_CURRENT_LIST_DIR}/dependencies/mpv-dev" CACHE PATH "Path to a staged libmpv development package")
 
 # Make sure all the dependencies are satisfied
 find_package(Python3 3.4 REQUIRED)
@@ -98,6 +98,9 @@ add_custom_command(TARGET ${LIBNAME} POST_BUILD
 )
 
 if(WIN32)
+    if(NOT EXISTS "${MPV_DIR}/bin/libmpv-2.dll")
+        message(STATUS "No staged libmpv runtime found at ${MPV_DIR}/bin/libmpv-2.dll; skipping runtime staging")
+    endif()
     file(GLOB MPV_RUNTIME_DLLS "${MPV_DIR}/bin/*.dll")
     if(MPV_RUNTIME_DLLS)
         foreach(MPV_RUNTIME_DLL IN LISTS MPV_RUNTIME_DLLS)

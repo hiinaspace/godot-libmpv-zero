@@ -1,0 +1,70 @@
+name: Build Windows Addon
+
+on:
+  workflow_dispatch:
+    inputs:
+      mpv_run_id:
+        description: "mpv-winbuild-cmake run id to consume (optional)"
+        required: false
+        type: string
+      mpv_workflow:
+        description: "mpv workflow name"
+        required: false
+        default: "mpv clang"
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Setup CMake
+        uses: jwlawson/actions-setup-cmake@v2
+
+      - name: Stage libmpv package
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $args = @()
+          if ("${{ inputs.mpv_run_id }}") {
+            $args += "-RunId"
+            $args += "${{ inputs.mpv_run_id }}"
+          }
+          if ("${{ inputs.mpv_workflow }}") {
+            $args += "-WorkflowName"
+            $args += "${{ inputs.mpv_workflow }}"
+          }
+          powershell -ExecutionPolicy Bypass -File .\tools\setup_windows_mpv_dev.ps1 @args
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          & "C:\Program Files\CMake\bin\cmake.exe" -S . -B build-ci -DMPV_DIR="${{ github.workspace }}\dependencies\mpv-dev"
+
+      - name: Build
+        shell: pwsh
+        run: |
+          & "C:\Program Files\CMake\bin\cmake.exe" --build build-ci --config Debug
+
+      - name: Upload addon artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libmpv-zero-windows-debug
+          path: |
+            project/bin/**
+            project/project.godot
+            project/*.tscn
+            project/*.gd
+          if-no-files-found: error

@@ -16,7 +16,7 @@ if (-not (Test-Path $MpvSource)) {
 
 if ([string]::IsNullOrWhiteSpace($StageDir)) {
     $repoRoot = Split-Path -Parent $PSScriptRoot
-    $StageDir = Join-Path $repoRoot "dependencies\mpv-local"
+    $StageDir = Join-Path $repoRoot "dependencies\mpv-dev"
 }
 
 $mpvSourceUnix = $MpvSource -replace '^([A-Za-z]):', '/$1' -replace '\\', '/'
