@@ -64,6 +64,8 @@ powershell -ExecutionPolicy Bypass -File .\tools\run_sample_console.ps1 -MediaSo
 
 - [windows-addon.yml](/S:/code/godot-libmpv-zero/.github/workflows/windows-addon.yml) builds the Windows addon against staged `mpv` artifacts from the forked `mpv-winbuild-cmake` workflow.
 - The workflow artifact is intended to be a reusable addon bundle, not just the raw sample project output.
+- Pushing a tag matching `v*` publishes a prerelease automatically.
+- You can also dispatch the workflow manually and pass `release_tag` to publish an ad hoc prerelease from the Actions UI.
 
 ## Status
 
