@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Build a Godot 4 GDExtension video player for VR-focused games that uses `libmpv` for playback and targets efficient, production-usable rendering on Windows and Linux.
+Build a Godot 4 GDExtension video player for VR-focused games that uses `libmpv` for playback and targets efficient, production-usable rendering, starting with Windows x86_64.
 
 The intended use case is in-world video playback similar to VRChat / ChilloutVR media players, where video playback must leave enough GPU and CPU budget for the rest of the VR application.
 
@@ -20,21 +20,22 @@ Both approaches are too expensive for the target use case. For VR, the design go
 Create a new plugin, based on `godot-cpp-template`, that provides:
 
 - `libmpv`-backed video playback
-- Windows and Linux support as first-class targets
 - a Vulkan-oriented rendering path
 - zero-copy, or as close to zero-copy as practical
 - an API suitable for in-game 3D surfaces and VR environments
+- Godot-routed per-channel audio suitable for spatial playback
 
 ## Success Criteria
 
 The project is successful when all of the following are true:
 
-- A Godot 4 project can place video on a 3D surface in-game on Windows and Linux.
+- A Godot 4 project can place video on a 3D surface in-game on Windows.
 - The playback path does not perform per-frame CPU readback like `glReadPixels()`.
 - The plugin works in exported games, not just in the editor.
-- Build and packaging are automated in GitHub Actions for primary target platforms.
+- Build and packaging are automated in GitHub Actions for Windows.
 - Exported binaries are easy to drop into a Godot project as a normal addon.
 - Runtime dependency handling is explicit and reproducible.
+- Stereo source channels can be routed to separate Godot or Steam Audio spatial emitters.
 
 ## Non-Goals
 
@@ -86,8 +87,8 @@ Priority order:
 
 - Primary:
   - Windows x86_64
-  - Linux x86_64
 - Nice to have later:
+  - Linux x86_64
   - Linux ARM64
   - macOS
 
@@ -144,7 +145,7 @@ These questions should be answered early in the new repo:
 
 ### Milestone 3: Packaging
 
-- Add GitHub Actions builds for Windows and Linux
+- Add GitHub Actions builds for Windows
 - Package runtime dependencies correctly
 - Verify exported addon layout and runtime loading
 
@@ -156,4 +157,4 @@ These questions should be answered early in the new repo:
 
 ## Guiding Principle
 
-This project should optimize for the correct rendering architecture first. A smaller feature set with a viable GPU-native path is more valuable than a feature-rich player built on unavoidable CPU copies.
+This project should optimize for the correct rendering architecture and VR-safe playback behavior first. A smaller feature set with a viable GPU-native path and hitch-free transport is more valuable than a feature-rich player built on unavoidable CPU copies or blocking transitions.

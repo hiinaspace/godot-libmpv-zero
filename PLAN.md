@@ -728,9 +728,22 @@ the dependency management problem is simpler than Windows.
 
 ## Immediate Next Steps
 
-1. Clean up the current prototype code so the repo surface matches the Vulkan-only architecture already proven locally.
-2. Investigate the best production audio integration path:
-   engine patch for audio-thread hooks vs plugin-owned custom playback object.
-3. Prototype a pull-style per-channel playback path that can coexist with Steam Audio expectations.
-4. Once the production audio path is chosen, return to packaging and VR validation with that architecture fixed.
+1. Run broader code and product review before wider external testing.
+2. Cut and validate a prerelease build from the current GitHub Actions and release workflow.
+3. Decide whether to further reduce startup / first-frame latency or defer it as acceptable prototype behavior.
+4. Revisit mpv fork cleanup and public artifact strategy only after the plugin surface is stable enough for outside testers.
+
+## Current State
+
+The current prototype has already validated more than the early plan assumed:
+
+- Vulkan external-image video playback is working in Godot scenes.
+- `MPVTexture` is usable as a Godot-facing texture resource in authored materials.
+- the plugin exposes a scene-friendly `MPVPlayer` API with transport controls.
+- pull-based per-channel audio is working without audible xruns on the tested media.
+- Steam Audio routing works in the VR sample.
+- seek and reload paths were tuned to avoid noticeable VR frame hitches on the tested machine.
+- Windows CI can build prerelease addon bundles against forked mpv artifacts.
+
+The remaining work is less about existential feasibility and more about product hardening, review, and release polish.
 

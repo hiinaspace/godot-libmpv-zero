@@ -8,6 +8,7 @@ Experimental Godot 4 GDExtension for `libmpv`-backed video playback with:
 - scene-friendly `MPVPlayer` + `MPVTexture` API
 - VR/OpenXR sample scenes
 - Steam Audio validation in the sample project
+- transport operations tuned to avoid noticeable VR frame hitches on tested hardware
 
 ## Repository layout
 
@@ -90,6 +91,14 @@ player.seek(12.5)
 player.stop()
 ```
 
+`MPVPlayer` can also drive existing scene audio nodes directly through `left_audio_target` and `right_audio_target`.
+
+Supported targets in the current prototype:
+
+- `AudioStreamPlayer`
+- `AudioStreamPlayer3D`
+- `SteamAudioPlayer`
+
 ## GitHub Actions
 
 - [windows-addon.yml](/S:/code/godot-libmpv-zero/.github/workflows/windows-addon.yml) builds the Windows addon against staged `mpv` artifacts from the forked `mpv-winbuild-cmake` workflow.
@@ -101,9 +110,17 @@ player.stop()
 
 Current prototype milestones already validated locally:
 
-- stable Vulkan video playback in Godot
+- stable Vulkan video playback in Godot scenes
+- `MPVTexture` resource workflow in authored materials
 - stable audio playback without xruns on tested media
 - VR sample playback through OpenXR
 - Steam Audio spatialization with per-channel playback
+- seek and reload transitions tuned to avoid noticeable VR frame hitches on the tested machine
 
-This is still prototype software. Packaging, API cleanup, and release polish are still in progress.
+Known rough edges:
+
+- Windows x86_64 is the only release-ready target today
+- wrapped texture RID cleanup still leaks on exit instead of risking reload-time crashes
+- startup / first-frame bring-up is still noticeable
+
+This is still prototype software, but the core playback path is now usable enough for external testing and prerelease builds.
