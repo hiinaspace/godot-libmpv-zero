@@ -1,6 +1,69 @@
-[gd_scene load_steps=2 format=3 uid="uid://dh0oj81pufivs"]
+[gd_scene format=3 uid="uid://dh0oj81pufivs"]
 
-[ext_resource type="Script" path="res://example.gd" id="1_jdh55"]
+[ext_resource type="Script" uid="uid://d1svt4sle58jx" path="res://example.gd" id="1_jdh55"]
+[ext_resource type="Texture2D" uid="uid://lxjykfe6kvg8" path="res://mpv_texture.tres" id="2_n51mc"]
 
-[node name="Root" type="Node3D"]
+[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_8lvy3"]
+sky_horizon_color = Color(0.66224277, 0.6717428, 0.6867428, 1)
+ground_horizon_color = Color(0.66224277, 0.6717428, 0.6867428, 1)
+
+[sub_resource type="Sky" id="Sky_wcwec"]
+sky_material = SubResource("ProceduralSkyMaterial_8lvy3")
+
+[sub_resource type="Environment" id="Environment_ei00m"]
+background_mode = 2
+sky = SubResource("Sky_wcwec")
+tonemap_mode = 2
+glow_enabled = true
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_ugfer"]
+albedo_color = Color(0.17303586, 0.07935945, 0.0546782, 1)
+
+[sub_resource type="PlaneMesh" id="PlaneMesh_rujmf"]
+material = SubResource("StandardMaterial3D_ugfer")
+size = Vector2(10, 10)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_kkclv"]
+shading_mode = 0
+albedo_texture = ExtResource("2_n51mc")
+albedo_texture_force_srgb = true
+
+[sub_resource type="QuadMesh" id="QuadMesh_mt10o"]
+lightmap_size_hint = Vector2i(17, 12)
+material = SubResource("StandardMaterial3D_kkclv")
+add_uv2 = true
+size = Vector2(3, 2)
+
+[node name="Root" type="Node3D" unique_id=785761352]
 script = ExtResource("1_jdh55")
+
+[node name="Camera3D" type="Camera3D" parent="." unique_id=1159966468]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
+
+[node name="AudioListener3D" type="AudioListener3D" parent="Camera3D" unique_id=1616724971]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=165222652]
+environment = SubResource("Environment_ei00m")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=488258786]
+transform = Transform3D(-0.8660254, -0.43301278, 0.25, 0, 0.49999997, 0.86602545, -0.50000006, 0.75, -0.43301266, 0, 0, 0)
+shadow_enabled = true
+
+[node name="Floor" type="MeshInstance3D" parent="." unique_id=29629568]
+mesh = SubResource("PlaneMesh_rujmf")
+
+[node name="MPVPlayer" type="MPVPlayer" parent="." unique_id=102643760]
+source = "res://smoke_test_lr_sync.mp4"
+output_texture = ExtResource("2_n51mc")
+left_audio_target = NodePath("../Screen/LeftSpeaker")
+right_audio_target = NodePath("../Screen/RightSpeaker")
+
+[node name="Screen" type="MeshInstance3D" parent="." unique_id=1759865746]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.3108177, -2)
+mesh = SubResource("QuadMesh_mt10o")
+
+[node name="LeftSpeaker" type="AudioStreamPlayer3D" parent="Screen" unique_id=2088877169]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2, 0, 0)
+
+[node name="RightSpeaker" type="AudioStreamPlayer3D" parent="Screen" unique_id=1161907217]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2, 0, 0)

@@ -21,5 +21,6 @@ config/icon="res://icon.svg"
 
 [xr]
 
-openxr/enabled=true
+openxr/enabled=false
+openxr/extensions/render_model=true
 shaders/enabled=true

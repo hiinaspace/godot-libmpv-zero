@@ -7,6 +7,7 @@
 
 #include "channel_audio_stream.h"
 #include "mpv_player.h"
+#include "mpv_texture.h"
 #include "render_thread_service.h"
 
 using namespace godot;
@@ -17,6 +18,7 @@ void initialize_gdextension_types(ModuleInitializationLevel p_level) {
 	}
 	GDREGISTER_CLASS(ChannelAudioStream);
 	GDREGISTER_CLASS(ChannelAudioStreamPlayback);
+	GDREGISTER_CLASS(MPVTexture);
 	GDREGISTER_CLASS(MPVPlayer);
 	GDREGISTER_CLASS(libmpv_zero::RenderThreadService);
 }

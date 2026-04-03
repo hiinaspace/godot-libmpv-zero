@@ -1,179 +1,132 @@
 extends Node3D
 
-const SPEAKER_OFFSETS := [
-	Vector3(-1.4, 0.0, 0.35),
-	Vector3(1.4, 0.0, 0.35),
-]
-const VIDEO_DISTANCE := 2.5
-const VIDEO_DEPTH := 0.12
 const DEFAULT_MEDIA_SOURCE := "https://file.vrg.party/ichigoova01.m3u8"
+const MOVE_SPEED := 3.0
+const SNAP_TURN_ANGLE := deg_to_rad(30.0)
+const STICK_DEADZONE := 0.2
+const SEEK_STEP := 5.0
 
-var _audio_players: Array[AudioStreamPlayer3D] = []
-var _video_faces: Array[MeshInstance3D] = []
-var _player: MPVPlayer
-var _video_root: Node3D
-var _video_material: StandardMaterial3D
-var _emissive_screen: MeshInstance3D
-var _xr_origin: XROrigin3D
-var _xr_camera: XRCamera3D
+@onready var _xr_origin: XROrigin3D = $XROrigin3D
+@onready var _xr_camera: XRCamera3D = $XROrigin3D/XRCamera3D
+@onready var _emissive_screen: MeshInstance3D = $EmissiveScreen
+@onready var _left_audio_player: Node = $EmissiveScreen/LeftSpeaker
+@onready var _right_audio_player: Node = $EmissiveScreen/RightSpeaker
+@onready var _player: MPVPlayer = $MPVPlayer
+
 var _media_source := ""
+var _screen_base_height := 2.0
+var _left_controller: XRController3D
+var _right_controller: XRController3D
+var _snap_turn_ready := true
+var _left_ax_ready := true
+var _left_by_ready := true
+var _right_ax_ready := true
+var _right_by_ready := true
 var xr_interface: XRInterface
-var _using_steam_audio := false
 
 func _ready() -> void:
 	xr_interface = XRServer.find_interface("OpenXR")
-	if xr_interface and xr_interface.is_initialized():
-		print("OpenXR initialized successfully")
-
-		# Turn off v-sync!
-		DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
-
-		# Change our main viewport to output to the HMD
-		get_viewport().use_xr = true
+	if xr_interface:
+		if not xr_interface.is_initialized():
+			xr_interface.initialize()
+		if xr_interface.is_initialized():
+			DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
+			get_viewport().use_xr = true
+		else:
+			push_warning("OpenXR failed to initialize, please check if your headset is connected")
 	else:
-		print("OpenXR not initialized, please check if your headset is connected")
-		
+		push_warning("OpenXR not initialized, please check if your headset is connected")
+
 	_media_source = _resolve_media_source()
-	_xr_origin = get_node_or_null("XROrigin3D")
-	_xr_camera = get_node_or_null("XROrigin3D/XRCamera3D")
-	_emissive_screen = get_node_or_null("EmissiveScreen")
-	if _xr_origin == null or _xr_camera == null:
-		push_error("example_vr.gd expects XROrigin3D/XRCamera3D in the scene.")
-		return
-
-	_create_video_root()
-	_create_player()
-	_create_speakers()
-	_position_video_rig()
-
-	_player.load_file(_media_source)
-	_player.play()
-	print("example_vr.gd load_file issued: %s" % _media_source)
-	print("example_vr.gd spatial audio backend: %s" % ("SteamAudioPlayer" if _using_steam_audio else "AudioStreamPlayer3D"))
+	_capture_screen_defaults()
+	_ensure_controllers()
+	_configure_screen_material()
+	_configure_player()
 
 
-func _exit_tree() -> void:
-	for audio_player in _audio_players:
-		audio_player.queue_free()
-	_audio_players.clear()
-	_video_faces.clear()
+func _process(delta: float) -> void:
+	_update_xr_movement(delta)
+	_update_xr_media_controls()
 
 
-func _create_video_root() -> void:
-	if _emissive_screen != null:
-		_video_root = _emissive_screen
-		_emissive_screen.gi_mode = GeometryInstance3D.GI_MODE_DYNAMIC
+func _capture_screen_defaults() -> void:
+	if _emissive_screen.mesh is QuadMesh:
+		_screen_base_height = (_emissive_screen.mesh as QuadMesh).size.y
+
+
+func _ensure_controllers() -> void:
+	_left_controller = _xr_origin.get_node_or_null("LeftController")
+	if _left_controller == null:
+		_left_controller = XRController3D.new()
+		_left_controller.name = "LeftController"
+		_left_controller.tracker = "left_hand"
+		_xr_origin.add_child(_left_controller)
+
+	_right_controller = _xr_origin.get_node_or_null("RightController")
+	if _right_controller == null:
+		_right_controller = XRController3D.new()
+		_right_controller.name = "RightController"
+		_right_controller.tracker = "right_hand"
+		_xr_origin.add_child(_right_controller)
+
+
+func _configure_screen_material() -> void:
+	_emissive_screen.gi_mode = GeometryInstance3D.GI_MODE_DYNAMIC
+	if _player.output_texture == null:
+		_player.output_texture = MPVTexture.new()
+
+	var base_material := _emissive_screen.get_active_material(0) as StandardMaterial3D
+	var material := base_material
+	if material != null:
+		material = material.duplicate() as StandardMaterial3D
 	else:
-		_video_root = Node3D.new()
-		_video_root.name = "VideoRoot"
-		add_child(_video_root)
+		material = StandardMaterial3D.new()
+		material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		material.cull_mode = BaseMaterial3D.CULL_DISABLED
+		material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+		material.emission_enabled = true
+		material.emission = Color(1.0, 1.0, 1.0, 1.0)
+		material.emission_energy_multiplier = 7.0
 
-	var base_material: StandardMaterial3D
-	if _emissive_screen != null:
-		base_material = _emissive_screen.get_active_material(0) as StandardMaterial3D
-		if base_material != null:
-			_video_material = base_material.duplicate() as StandardMaterial3D
-
-	if _video_material == null:
-		_video_material = StandardMaterial3D.new()
-		_video_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		_video_material.cull_mode = BaseMaterial3D.CULL_DISABLED
-		_video_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
-		_video_material.emission_enabled = true
-		_video_material.emission = Color(1.0, 1.0, 1.0, 1.0)
-		_video_material.emission_energy_multiplier = 7.01
-
-	_video_material.albedo_texture_force_srgb = true
-
-	if _emissive_screen != null:
-		_emissive_screen.set_surface_override_material(0, _video_material)
-	else:
-		_rebuild_video_cube_faces(2.1, 1.2, VIDEO_DEPTH)
+	material.albedo_texture_force_srgb = true
+	material.albedo_texture = _player.output_texture
+	material.emission_texture = _player.output_texture
+	_emissive_screen.set_surface_override_material(0, material)
 
 
-func _create_player() -> void:
-	_player = MPVPlayer.new()
-	add_child(_player)
-	_player.audio_channels_changed.connect(_on_audio_channels_changed)
+func _configure_player() -> void:
+	_player.left_audio_target = _player.get_path_to(_left_audio_player)
+	_player.right_audio_target = _player.get_path_to(_right_audio_player)
+	_player.source = _media_source
+	_player.autoplay = true
+
 	_player.video_size_changed.connect(_on_video_size_changed)
-	_player.texture_changed.connect(_on_texture_changed)
 	_player.file_loaded.connect(_on_file_loaded)
 	_player.playback_finished.connect(_on_playback_finished)
-	print("example_vr.gd mpv status: %s" % _player.get_mpv_status())
+	_player.playback_error.connect(_on_playback_error)
 
-
-func _create_speakers() -> void:
-	for i in range(2):
-		var marker := MeshInstance3D.new()
-		var sphere := SphereMesh.new()
-		sphere.radius = 0.08
-		sphere.height = 0.16
-		marker.mesh = sphere
-		marker.position = SPEAKER_OFFSETS[i]
-		var material := StandardMaterial3D.new()
-		material.albedo_color = Color(0.95, 0.45, 0.18) if i == 0 else Color(0.18, 0.65, 0.95)
-		marker.set_surface_override_material(0, material)
-		if _emissive_screen != null:
-			add_child(marker)
-		else:
-			_video_root.add_child(marker)
-
-
-func _position_video_rig() -> void:
-	if _emissive_screen != null:
-		return
-	var camera_basis := _xr_camera.global_transform.basis
-	var camera_origin := _xr_camera.global_transform.origin
-	var forward := -camera_basis.z
-	forward.y = 0.0
-	if forward.length_squared() < 0.0001:
-		forward = Vector3.FORWARD
-	forward = forward.normalized()
-
-	_video_root.global_position = camera_origin + forward * VIDEO_DISTANCE
-	_video_root.global_position.y = camera_origin.y
-	_video_root.look_at(camera_origin, Vector3.UP, true)
-
-
-func _on_audio_channels_changed(count: int) -> void:
-	for audio_player in _audio_players:
-		audio_player.queue_free()
-	_audio_players.clear()
-
-	for i in range(count):
-		var audio_player := _create_spatial_audio_player()
-		audio_player.name = "Speaker%d" % i
-		audio_player.position = SPEAKER_OFFSETS[min(i, SPEAKER_OFFSETS.size() - 1)]
-		if _emissive_screen != null:
-			add_child(audio_player)
-		else:
-			_video_root.add_child(audio_player)
-		_configure_spatial_audio_player(audio_player)
-		_start_spatial_audio_player(audio_player, _player.get_audio_stream_for_channel(i))
-		_audio_players.append(audio_player)
+	_player.load(_media_source)
+	_player.play()
 
 
 func _on_video_size_changed(width: int, height: int) -> void:
-	print("example_vr.gd video_size_changed: %dx%d" % [width, height])
-	if width > 0 and height > 0 and _emissive_screen == null:
+	if width > 0 and height > 0 and _emissive_screen.mesh is QuadMesh:
+		var quad := _emissive_screen.mesh as QuadMesh
 		var aspect := float(width) / float(height)
-		_rebuild_video_cube_faces(1.8 * aspect, 1.8, VIDEO_DEPTH)
-
-
-func _on_texture_changed() -> void:
-	var texture := _player.get_texture()
-	_video_material.albedo_texture = texture
-	_video_material.emission_texture = texture
+		quad.size = Vector2(_screen_base_height * aspect, _screen_base_height)
 
 
 func _on_file_loaded() -> void:
-	print("example_vr.gd file_loaded signal")
+	pass
 
 
 func _on_playback_finished() -> void:
-	for audio_player in _audio_players:
-		audio_player.stop()
-	print("example_vr.gd playback_finished signal")
+	pass
+
+
+func _on_playback_error(message: String) -> void:
+	push_warning(message)
+	print("example_vr.gd playback_error: %s" % message)
 
 
 func _resolve_media_source() -> String:
@@ -182,7 +135,7 @@ func _resolve_media_source() -> String:
 		return _normalize_media_source(env_source)
 
 	for arg in OS.get_cmdline_user_args():
-		if arg.begins_with("--media="):
+		if arg.begins_with("--media="):	
 			return _normalize_media_source(arg.substr(8))
 		if not arg.begins_with("--"):
 			return _normalize_media_source(arg)
@@ -205,65 +158,84 @@ func _normalize_media_source(source: String) -> String:
 	return ProjectSettings.globalize_path("res://" + trimmed)
 
 
-func _rebuild_video_cube_faces(width: float, height: float, depth: float) -> void:
-	if _video_root == null or _emissive_screen != null:
+func _toggle_play_pause() -> void:
+	if _player.is_playing():
+		_player.pause()
+	else:
+		_player.play()
+
+
+func _seek_by(offset_seconds: float) -> void:
+	var target: float = maxf(0.0, _player.get_playback_position() + offset_seconds)
+	var duration: float = _player.get_duration()
+	if duration > 0.0:
+		target = minf(target, duration)
+	_player.seek(target)
+
+
+func _reload_media() -> void:
+	_player.load(_media_source)
+	_player.play()
+
+
+func _update_button_edge(controller: XRController3D, action_name: StringName, ready: bool, callback: Callable) -> bool:
+	var pressed: bool = controller != null and controller.is_button_pressed(action_name)
+	if not pressed:
+		return true
+	if not ready:
+		return false
+	callback.call()
+	return false
+
+
+func _update_xr_media_controls() -> void:
+	_left_ax_ready = _update_button_edge(_left_controller, &"ax_button", _left_ax_ready, Callable(self, "_toggle_play_pause"))
+	_left_by_ready = _update_button_edge(_left_controller, &"by_button", _left_by_ready, Callable(self, "_reload_media"))
+	_right_ax_ready = _update_button_edge(_right_controller, &"ax_button", _right_ax_ready, Callable(self, "_seek_forward"))
+	_right_by_ready = _update_button_edge(_right_controller, &"by_button", _right_by_ready, Callable(self, "_seek_backward"))
+
+
+func _seek_forward() -> void:
+	_seek_by(SEEK_STEP)
+
+
+func _seek_backward() -> void:
+	_seek_by(-SEEK_STEP)
+
+
+func _update_xr_movement(delta: float) -> void:
+	if _left_controller == null or _right_controller == null:
 		return
 
-	for face in _video_faces:
-		if is_instance_valid(face):
-			face.queue_free()
-	_video_faces.clear()
+	var move_input := _left_controller.get_vector2("primary")
+	if move_input.length() >= STICK_DEADZONE:
+		var basis := _xr_camera.global_transform.basis
+		var forward := -basis.z
+		forward.y = 0.0
+		forward = forward.normalized()
+		var right := basis.x
+		right.y = 0.0
+		right = right.normalized()
+		var movement := (right * move_input.x + forward * move_input.y) * MOVE_SPEED * delta
+		_xr_origin.global_position += movement
 
-	var front := _make_video_face(Vector2(width, height), Vector3(0.0, 0.0, depth * 0.5), Vector3.ZERO)
-	var back := _make_video_face(Vector2(width, height), Vector3(0.0, 0.0, -depth * 0.5), Vector3(0.0, 180.0, 0.0))
-	var right := _make_video_face(Vector2(depth, height), Vector3(width * 0.5, 0.0, 0.0), Vector3(0.0, -90.0, 0.0))
-	var left := _make_video_face(Vector2(depth, height), Vector3(-width * 0.5, 0.0, 0.0), Vector3(0.0, 90.0, 0.0))
-	var top := _make_video_face(Vector2(width, depth), Vector3(0.0, height * 0.5, 0.0), Vector3(-90.0, 0.0, 0.0))
-	var bottom := _make_video_face(Vector2(width, depth), Vector3(0.0, -height * 0.5, 0.0), Vector3(90.0, 0.0, 0.0))
+	var turn_input_x := _right_controller.get_vector2("primary").x
+	if abs(turn_input_x) < STICK_DEADZONE:
+		_snap_turn_ready = true
+		return
 
-	_video_faces.append_array([front, back, right, left, top, bottom])
+	if not _snap_turn_ready:
+		return
 
-
-func _make_video_face(size: Vector2, position: Vector3, rotation_degrees: Vector3) -> MeshInstance3D:
-	var face := MeshInstance3D.new()
-	var quad := QuadMesh.new()
-	quad.size = size
-	face.mesh = quad
-	face.position = position
-	face.rotation_degrees = rotation_degrees
-	face.set_surface_override_material(0, _video_material)
-	_video_root.add_child(face)
-	return face
+	_snap_turn_ready = false
+	_apply_snap_turn(-sign(turn_input_x) * SNAP_TURN_ANGLE)
 
 
-func _create_spatial_audio_player() -> AudioStreamPlayer3D:
-	if ClassDB.class_exists("SteamAudioPlayer"):
-		var steam_player := ClassDB.instantiate("SteamAudioPlayer") as AudioStreamPlayer3D
-		if steam_player != null:
-			_using_steam_audio = true
-			return steam_player
+func _apply_snap_turn(angle_radians: float) -> void:
+	var camera_position := _xr_camera.global_position
+	var origin_position := _xr_origin.global_position
+	var offset := origin_position - camera_position
+	offset = offset.rotated(Vector3.UP, angle_radians)
 
-	_using_steam_audio = false
-	return AudioStreamPlayer3D.new()
-
-
-func _configure_spatial_audio_player(audio_player: AudioStreamPlayer3D) -> void:
-	audio_player.max_distance = 12.0
-	audio_player.unit_size = 2.0
-
-	if _using_steam_audio:
-		audio_player.set("distance_attenuation", true)
-		audio_player.set("min_attenuation_distance", 1.0)
-		audio_player.set("air_absorption", true)
-		audio_player.set("occlusion", false)
-		audio_player.set("reflection", false)
-	else:
-		audio_player.attenuation_model = AudioStreamPlayer3D.ATTENUATION_INVERSE_DISTANCE
-
-
-func _start_spatial_audio_player(audio_player: AudioStreamPlayer3D, stream: AudioStream) -> void:
-	if _using_steam_audio:
-		audio_player.call("play_stream", stream, 0.0, 0.0, 1.0)
-	else:
-		audio_player.stream = stream
-		audio_player.play()
+	_xr_origin.rotate_y(angle_radians)
+	_xr_origin.global_position = camera_position + offset

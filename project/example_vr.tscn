@@ -1,6 +1,7 @@
 [gd_scene format=3 uid="uid://dhtxqjfk33np4"]
 
 [ext_resource type="Script" uid="uid://btdd8iwwl45hs" path="res://example_vr.gd" id="1_e65hm"]
+[ext_resource type="Texture2D" uid="uid://lxjykfe6kvg8" path="res://mpv_texture.tres" id="3_k1670"]
 [ext_resource type="Material" uid="uid://bh10b17iv2xfn" path="res://emissive_screen.tres" id="4_n5d2f"]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_7d1c2"]
@@ -18,17 +19,17 @@ glow_enabled = true
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_7d1c2"]
 albedo_color = Color(0.09195144, 0.13902876, 0.020886086, 1)
-roughness = 0.22
+roughness = 0.11
 
 [sub_resource type="PlaneMesh" id="PlaneMesh_kp4wa"]
-lightmap_size_hint = Vector2i(140, 140)
+lightmap_size_hint = Vector2i(52, 52)
 material = SubResource("StandardMaterial3D_7d1c2")
 add_uv2 = true
 size = Vector2(10, 10)
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_kp4wa"]
 albedo_color = Color(0.43493083, 0.43547007, 0.7017172, 1)
-roughness = 0.53
+roughness = 0.16
 
 [sub_resource type="CylinderMesh" id="CylinderMesh_sbaep"]
 lightmap_size_hint = Vector2i(17, 19)
@@ -62,13 +63,19 @@ light_indirect_energy = 0.47
 shadow_enabled = true
 
 [node name="XROrigin3D" type="XROrigin3D" parent="." unique_id=1380973053]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0)
 
 [node name="XRCamera3D" type="XRCamera3D" parent="XROrigin3D" unique_id=464811525]
-
-[node name="AudioListener3D" type="AudioListener3D" parent="XROrigin3D/XRCamera3D" unique_id=1404392139]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0)
 
 [node name="SteamAudioListener" type="SteamAudioListener" parent="XROrigin3D/XRCamera3D" unique_id=731418761]
+
+[node name="LeftController" type="XRController3D" parent="XROrigin3D" unique_id=1376070624]
+tracker = &"left_hand"
+
+[node name="RightController" type="XRController3D" parent="XROrigin3D" unique_id=191063353]
+tracker = &"right_hand"
+
+[node name="OpenXRRenderModelManager" type="OpenXRRenderModelManager" parent="XROrigin3D" unique_id=34460369]
 
 [node name="Floor" type="MeshInstance3D" parent="." unique_id=1327948996]
 mesh = SubResource("PlaneMesh_kp4wa")
@@ -118,11 +125,30 @@ mesh = SubResource("CapsuleMesh_k1670")
 surface_material_override/0 = SubResource("StandardMaterial3D_n5d2f")
 
 [node name="ReflectionProbe" type="ReflectionProbe" parent="." unique_id=559318361]
-size = Vector3(10, 5, 10)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.2066015, 1.4569092)
+update_mode = 1
+size = Vector3(10, 4, 7.0861816)
 box_projection = true
 
 [node name="EmissiveScreen" type="MeshInstance3D" parent="." unique_id=663246320]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.724876, -2)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, -2)
 gi_mode = 2
 mesh = SubResource("QuadMesh_k1670")
 surface_material_override/0 = ExtResource("4_n5d2f")
+
+[node name="LeftSpeaker" type="SteamAudioPlayer" parent="EmissiveScreen" unique_id=356905389]
+distance_attenuation = true
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2, 0, 0)
+attenuation_model = 3
+panning_strength = 0.0
+
+[node name="RightSpeaker" type="SteamAudioPlayer" parent="EmissiveScreen" unique_id=998347492]
+distance_attenuation = true
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2, 0, 0)
+attenuation_model = 3
+panning_strength = 0.0
+
+[node name="MPVPlayer" type="MPVPlayer" parent="." unique_id=764076774]
+output_texture = ExtResource("3_k1670")
+left_audio_target = NodePath("../EmissiveScreen/LeftSpeaker")
+right_audio_target = NodePath("../EmissiveScreen/RightSpeaker")

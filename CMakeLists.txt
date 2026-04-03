@@ -64,6 +64,8 @@ target_sources(${LIBNAME}
     src/vk_video_output.h
     src/mpv_player.cpp
     src/mpv_player.h
+    src/mpv_texture.cpp
+    src/mpv_texture.h
     src/mini_vulkan.h
 )
 

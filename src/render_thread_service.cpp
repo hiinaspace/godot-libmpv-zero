@@ -152,6 +152,13 @@ void vk_destroy_external_image(const VulkanDispatch &p_dispatch, VkDevice p_devi
 void RenderThreadService::_bind_methods() {
 }
 
+bool RenderThreadService::_release_requests_match(const PendingReleaseRequest &p_a, const PendingReleaseRequest &p_b) {
+	return p_a.wrapped_texture == p_b.wrapped_texture &&
+			p_a.logical_device == p_b.logical_device &&
+			p_a.image_handle == p_b.image_handle &&
+			p_a.image_memory_handle == p_b.image_memory_handle;
+}
+
 bool RenderThreadService::request_external_texture(uint32_t p_width, uint32_t p_height, const Color &p_clear_color, bool p_clear_texture) {
 	RenderingServer *rendering_server = RenderingServer::get_singleton();
 	ERR_FAIL_NULL_V(rendering_server, false);
@@ -197,16 +204,28 @@ void RenderThreadService::release_external_texture(const ExternalTextureHandle &
 
 	{
 		std::lock_guard<std::mutex> lock(mutex);
-		if (release_request.active) {
-			status = "release request already in flight";
+		PendingReleaseRequest request;
+		request.wrapped_texture = p_handle.wrapped_texture;
+		request.logical_device = p_handle.logical_device;
+		request.image_handle = p_handle.image_handle;
+		request.image_memory_handle = p_handle.image_memory_handle;
+		if (release_request_active && _release_requests_match(active_release_request, request)) {
+			status = "queued external texture release";
 			return;
 		}
-
-		release_request.active = true;
-		release_request.wrapped_texture = p_handle.wrapped_texture;
-		release_request.logical_device = p_handle.logical_device;
-		release_request.image_handle = p_handle.image_handle;
-		release_request.image_memory_handle = p_handle.image_memory_handle;
+		for (const PendingReleaseRequest &queued : release_requests) {
+			if (_release_requests_match(queued, request)) {
+				status = "queued external texture release";
+				return;
+			}
+		}
+		release_requests.push_back(request);
+		if (release_request_active) {
+			status = "queued external texture release";
+			return;
+		}
+		release_request_active = true;
+		active_release_request = release_requests.front();
 	}
 
 	status = "queued external texture release";
@@ -215,7 +234,7 @@ void RenderThreadService::release_external_texture(const ExternalTextureHandle &
 
 bool RenderThreadService::has_pending_work() const {
 	std::lock_guard<std::mutex> lock(mutex);
-	return create_request.active || release_request.active;
+	return create_request.active || release_request_active || !release_requests.empty();
 }
 
 String RenderThreadService::get_status() const {
@@ -400,10 +419,22 @@ void RenderThreadService::_create_external_texture_on_render_thread() {
 
 void RenderThreadService::_release_external_texture_on_render_thread() {
 	PendingReleaseRequest release;
+	bool has_release = false;
 	{
 		std::lock_guard<std::mutex> lock(mutex);
-		release = release_request;
-		release_request = PendingReleaseRequest();
+		if (!release_requests.empty()) {
+			release = release_requests.front();
+			release_requests.erase(release_requests.begin());
+			has_release = true;
+			active_release_request = release;
+		} else {
+			release_request_active = false;
+			active_release_request = PendingReleaseRequest();
+		}
+	}
+
+	if (!has_release) {
+		return;
 	}
 
 	RenderingServer *rendering_server = RenderingServer::get_singleton();
@@ -416,9 +447,11 @@ void RenderThreadService::_release_external_texture_on_render_thread() {
 		return;
 	}
 
-	if (release.wrapped_texture.is_valid()) {
-		rendering_device->free_rid(release.wrapped_texture);
-	}
+	// The wrapped RD texture RID appears to outlive our expected ownership boundary
+	// during reload/shutdown, and freeing it here currently races Godot's internal
+	// texture lifetime management. Keep the raw Vulkan image/memory cleanup, but let
+	// the wrapped RID leak for now rather than crash on reload.
+	(void)rendering_device;
 
 	if (release.image_handle || release.image_memory_handle) {
 		VulkanDispatch dispatch;
@@ -430,6 +463,22 @@ void RenderThreadService::_release_external_texture_on_render_thread() {
 			vk_destroy_external_image(dispatch, device, image, memory);
 			vk_unload_dispatch(dispatch);
 		}
+	}
+
+	bool should_schedule_next = false;
+	{
+		std::lock_guard<std::mutex> lock(mutex);
+		should_schedule_next = !release_requests.empty();
+		if (!should_schedule_next) {
+			release_request_active = false;
+			active_release_request = PendingReleaseRequest();
+		} else {
+			active_release_request = release_requests.front();
+		}
+	}
+
+	if (should_schedule_next) {
+		rendering_server->call_on_render_thread(callable_mp(this, &RenderThreadService::_release_external_texture_on_render_thread));
 	}
 }
 

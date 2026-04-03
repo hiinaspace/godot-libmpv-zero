@@ -1,6 +1,7 @@
 #pragma once
 
 #include <mutex>
+#include <vector>
 
 #include <godot_cpp/classes/object.hpp>
 #include <godot_cpp/variant/color.hpp>
@@ -51,19 +52,21 @@ private:
 	};
 
 	struct PendingReleaseRequest {
-		bool active = false;
 		godot::RID wrapped_texture;
 		uint64_t logical_device = 0;
 		uint64_t image_handle = 0;
 		uint64_t image_memory_handle = 0;
 	};
 
+	static bool _release_requests_match(const PendingReleaseRequest &p_a, const PendingReleaseRequest &p_b);
 	void _create_external_texture_on_render_thread();
 	void _release_external_texture_on_render_thread();
 
 	mutable std::mutex mutex;
 	PendingCreateRequest create_request;
-	PendingReleaseRequest release_request;
+	std::vector<PendingReleaseRequest> release_requests;
+	bool release_request_active = false;
+	PendingReleaseRequest active_release_request;
 	ExternalTextureHandle pending_result;
 	godot::String status = "render thread service idle";
 };

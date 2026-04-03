@@ -8,8 +8,6 @@
 #include <godot_cpp/classes/texture2drd.hpp>
 #include <godot_cpp/core/memory.hpp>
 #include <godot_cpp/variant/callable_method_pointer.hpp>
-#include <godot_cpp/variant/utility_functions.hpp>
-
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -66,9 +64,6 @@ void VkVideoOutput::_render_frame_on_render_thread() {
 	};
 
 	const int render_result = dispatch.render(render_context, render_params);
-	if (render_result < 0) {
-		UtilityFunctions::print(vformat("VkVideoOutput render-thread result: %d", render_result));
-	}
 	if (render_result >= 0) {
 		slot.image_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 		slot.published = false;
@@ -163,10 +158,7 @@ bool VkVideoOutput::_ensure_external_textures(int p_width, int p_height, int p_t
 	}
 
 	status = vformat("requesting Vulkan texture %dx%d", p_width, p_height);
-	if (!texture_request_logged) {
-		UtilityFunctions::print(vformat("VkVideoOutput requested texture: %dx%d", p_width, p_height));
-		texture_request_logged = true;
-	}
+	texture_request_logged = true;
 	return false;
 }
 
@@ -211,10 +203,7 @@ bool VkVideoOutput::_ensure_render_context() {
 
 	dispatch.set_update_callback(render_context, &VkVideoOutput::_on_render_update, this);
 	status = "vulkan render context ready";
-	if (!render_context_logged) {
-		UtilityFunctions::print("VkVideoOutput render context ready");
-		render_context_logged = true;
-	}
+	render_context_logged = true;
 	return true;
 }
 
@@ -245,8 +234,7 @@ void VkVideoOutput::_retire_slot(TextureSlot &p_slot, int p_delay_updates) {
 		return;
 	}
 
-	if (published_slot_index >= 0 && slots[published_slot_index].handle.wrapped_texture == p_slot.handle.wrapped_texture && texture.is_valid()) {
-		texture->set_texture_rd_rid(RID());
+	if (published_slot_index >= 0 && slots[published_slot_index].handle.wrapped_texture == p_slot.handle.wrapped_texture) {
 		published_slot_index = -1;
 	}
 
@@ -318,10 +306,7 @@ void VkVideoOutput::attach(Node *p_owner, MpvCore *p_mpv_core, const Callable &p
 	texture_request_in_flight = false;
 	status = "vulkan backend waiting for video size";
 	_ensure_external_textures(1, 1, 1);
-	if (!attach_logged) {
-		UtilityFunctions::print("VkVideoOutput attached");
-		attach_logged = true;
-	}
+	attach_logged = true;
 }
 
 void VkVideoOutput::update() {
@@ -340,10 +325,7 @@ void VkVideoOutput::update() {
 			return;
 		}
 
-		if (!texture_ready_logged) {
-			UtilityFunctions::print(vformat("VkVideoOutput texture ready: %dx%d", result.width, result.height));
-			texture_ready_logged = true;
-		}
+		texture_ready_logged = true;
 
 		bool stored = false;
 		for (TextureSlot &slot : slots) {
@@ -441,10 +423,7 @@ void VkVideoOutput::detach() {
 		return;
 	}
 
-	if (texture.is_valid()) {
-		texture->set_texture_rd_rid(RID());
-		texture.unref();
-	}
+	texture.unref();
 
 	for (TextureSlot &slot : slots) {
 		_release_external_texture(slot.handle);

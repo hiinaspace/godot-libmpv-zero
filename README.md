@@ -5,6 +5,7 @@ Experimental Godot 4 GDExtension for `libmpv`-backed video playback with:
 - Vulkan external-image video rendering
 - forked `libmpv` audio callback support
 - per-channel Godot `AudioStream` playback
+- scene-friendly `MPVPlayer` + `MPVTexture` API
 - VR/OpenXR sample scenes
 - Steam Audio validation in the sample project
 
@@ -60,6 +61,33 @@ Use a custom media source:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\tools\run_sample_console.ps1 -MediaSource "https://example.com/video.mp4" -ShowFiltered
+```
+
+## Basic usage
+
+Create an `MPVTexture` resource, assign it to your material like any other `Texture2D`, and point an `MPVPlayer` at the same resource:
+
+```gdscript
+var video_texture := MPVTexture.new()
+var player := MPVPlayer.new()
+player.output_texture = video_texture
+player.source = "res://movie.mp4"
+player.autoplay = true
+player.left_audio_target = player.get_path_to($LeftSpeaker)
+player.right_audio_target = player.get_path_to($RightSpeaker)
+add_child(player)
+
+$ScreenMesh.material_override.albedo_texture = video_texture
+```
+
+Runtime control:
+
+```gdscript
+player.load("https://example.com/video.mp4")
+player.play()
+player.pause()
+player.seek(12.5)
+player.stop()
 ```
 
 ## GitHub Actions

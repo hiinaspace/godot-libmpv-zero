@@ -4,6 +4,9 @@ param(
 	[string]$LogDir = 'S:\code\godot-libmpv-zero\build-phase0\logs',
 	[Alias('Media-Source')]
 	[string]$MediaSource = '',
+	[ValidateSet('default', 'off', 'on')]
+	[string]$XrMode = 'off',
+	[double]$ReloadAfterSeconds = 0,
 	[int]$TimeoutSeconds = 0,
 	[switch]$ShowFiltered
 )
@@ -18,13 +21,17 @@ $stderrLog = Join-Path $LogDir "sample-$timestamp.stderr.log"
 
 $previousAutoQuit = $env:LIBMPV_ZERO_AUTOQUIT
 $previousMediaSource = $env:LIBMPV_ZERO_MEDIA
+$previousReloadAfter = $env:LIBMPV_ZERO_RELOAD_AFTER
 $env:LIBMPV_ZERO_AUTOQUIT = '1'
 if ($MediaSource) {
 	$env:LIBMPV_ZERO_MEDIA = $MediaSource
 }
+if ($ReloadAfterSeconds -gt 0) {
+	$env:LIBMPV_ZERO_RELOAD_AFTER = [string]$ReloadAfterSeconds
+}
 
 try {
-	$argumentList = @('--path', $ProjectDir)
+	$argumentList = @('--xr-mode', $XrMode, '--path', $ProjectDir)
 	if ($MediaSource) {
 		$argumentList += @('--', "--media=$MediaSource")
 	}
@@ -56,12 +63,21 @@ try {
 	} else {
 		Remove-Item Env:LIBMPV_ZERO_MEDIA -ErrorAction SilentlyContinue
 	}
+	if ($null -ne $previousReloadAfter) {
+		$env:LIBMPV_ZERO_RELOAD_AFTER = $previousReloadAfter
+	} else {
+		Remove-Item Env:LIBMPV_ZERO_RELOAD_AFTER -ErrorAction SilentlyContinue
+	}
 }
 
 Write-Output "stdout: $stdoutLog"
 Write-Output "stderr: $stderrLog"
 if ($MediaSource) {
 	Write-Output "media: $MediaSource"
+}
+Write-Output "xr_mode: $XrMode"
+if ($ReloadAfterSeconds -gt 0) {
+	Write-Output "reload_after: $ReloadAfterSeconds"
 }
 
 if ($ShowFiltered) {

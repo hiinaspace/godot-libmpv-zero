@@ -1,8 +1,8 @@
 [gd_resource type="StandardMaterial3D" format=3 uid="uid://bh10b17iv2xfn"]
 
-[sub_resource type="PlaceholderTexture2D" id="PlaceholderTexture2D_edco8"]
-size = Vector2(256, 256)
+[ext_resource type="Texture2D" uid="uid://lxjykfe6kvg8" path="res://mpv_texture.tres" id="1_cut78"]
 
 [resource]
-albedo_texture = SubResource("PlaceholderTexture2D_edco8")
-emission_texture = SubResource("PlaceholderTexture2D_edco8")
+shading_mode = 0
+albedo_texture = ExtResource("1_cut78")
+albedo_texture_force_srgb = true
