@@ -48,6 +48,7 @@ public:
 	int get_video_width() const;
 	int get_video_height() const;
 	bool is_playing() const;
+	bool is_seeking() const;
 	PlaybackState get_playback_state() const;
 	const godot::String &get_status() const;
 	bool is_initialized() const;
@@ -64,6 +65,7 @@ private:
 	PlaybackState playback_state = PlaybackState::STOPPED;
 	bool file_loaded = false;
 	bool eof_reached = false;
+	bool seeking = false;
 	int video_width = 0;
 	int video_height = 0;
 	VideoOutputMode video_output_mode = VideoOutputMode::LIBMPV;

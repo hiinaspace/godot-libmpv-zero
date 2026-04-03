@@ -47,6 +47,7 @@ void VkVideoOutput::_render_frame_on_render_thread() {
 
 	mpv_vulkan_image image = {};
 	int block_for_target_time = 0;
+	int skip_rendering = mpv_core && mpv_core->is_seeking() ? 1 : 0;
 	image.image = reinterpret_cast<VkImage>(slot.handle.image_handle);
 	image.width = static_cast<int>(slot.handle.width);
 	image.height = static_cast<int>(slot.handle.height);
@@ -59,6 +60,7 @@ void VkVideoOutput::_render_frame_on_render_thread() {
 
 	mpv_render_param render_params[] = {
 		{ MPV_RENDER_PARAM_BLOCK_FOR_TARGET_TIME, &block_for_target_time },
+		{ MPV_RENDER_PARAM_SKIP_RENDERING, &skip_rendering },
 		{ MPV_RENDER_PARAM_VULKAN_IMAGE, &image },
 		{ MPV_RENDER_PARAM_INVALID, nullptr },
 	};

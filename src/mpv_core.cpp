@@ -26,6 +26,7 @@ struct MpvDispatch {
 	PFN_mpv_error_string error_string = nullptr;
 	PFN_mpv_set_option_string set_option_string = nullptr;
 	PFN_mpv_command command = nullptr;
+	PFN_mpv_command_async command_async = nullptr;
 	PFN_mpv_set_property_string set_property_string = nullptr;
 	PFN_mpv_get_property get_property = nullptr;
 	PFN_mpv_get_property_string get_property_string = nullptr;
@@ -134,6 +135,7 @@ bool load_mpv_dispatch(String &r_error) {
 	dispatch.error_string = reinterpret_cast<PFN_mpv_error_string>(GetProcAddress(dispatch.library, "mpv_error_string"));
 	dispatch.set_option_string = reinterpret_cast<PFN_mpv_set_option_string>(GetProcAddress(dispatch.library, "mpv_set_option_string"));
 	dispatch.command = reinterpret_cast<PFN_mpv_command>(GetProcAddress(dispatch.library, "mpv_command"));
+	dispatch.command_async = reinterpret_cast<PFN_mpv_command_async>(GetProcAddress(dispatch.library, "mpv_command_async"));
 	dispatch.set_property_string = reinterpret_cast<PFN_mpv_set_property_string>(GetProcAddress(dispatch.library, "mpv_set_property_string"));
 	dispatch.get_property = reinterpret_cast<PFN_mpv_get_property>(GetProcAddress(dispatch.library, "mpv_get_property"));
 	dispatch.get_property_string = reinterpret_cast<PFN_mpv_get_property_string>(GetProcAddress(dispatch.library, "mpv_get_property_string"));
@@ -141,7 +143,7 @@ bool load_mpv_dispatch(String &r_error) {
 	dispatch.wait_event = reinterpret_cast<PFN_mpv_wait_event>(GetProcAddress(dispatch.library, "mpv_wait_event"));
 	dispatch.set_godot_audio_callback = reinterpret_cast<PFN_mpv_godot_audio_set_callback>(GetProcAddress(dispatch.library, "mpv_godot_audio_set_callback"));
 
-	if (!dispatch.create || !dispatch.initialize || !dispatch.terminate_destroy || !dispatch.error_string || !dispatch.set_option_string || !dispatch.command || !dispatch.set_property_string || !dispatch.get_property || !dispatch.free_fn || !dispatch.wait_event || !dispatch.set_godot_audio_callback) {
+	if (!dispatch.create || !dispatch.initialize || !dispatch.terminate_destroy || !dispatch.error_string || !dispatch.set_option_string || !dispatch.command || !dispatch.command_async || !dispatch.set_property_string || !dispatch.get_property || !dispatch.free_fn || !dispatch.wait_event || !dispatch.set_godot_audio_callback) {
 		String missing;
 		if (!dispatch.create) {
 			missing += " mpv_create";
@@ -160,6 +162,9 @@ bool load_mpv_dispatch(String &r_error) {
 		}
 		if (!dispatch.command) {
 			missing += " mpv_command";
+		}
+		if (!dispatch.command_async) {
+			missing += " mpv_command_async";
 		}
 		if (!dispatch.set_property_string) {
 			missing += " mpv_set_property_string";
@@ -253,6 +258,7 @@ bool MpvCore::initialize() {
 	initialized = true;
 	file_loaded = false;
 	eof_reached = false;
+	seeking = false;
 	status = "libmpv initialized";
 	return true;
 }
@@ -268,6 +274,7 @@ void MpvCore::shutdown() {
 	playback_state = PlaybackState::STOPPED;
 	file_loaded = false;
 	eof_reached = false;
+	seeking = false;
 	loaded_path = "";
 	time_pos = 0.0;
 	duration = 0.0;
@@ -291,6 +298,7 @@ void MpvCore::load_file(const String &p_path) {
 	playback_state = PlaybackState::STOPPED;
 	file_loaded = false;
 	eof_reached = false;
+	seeking = false;
 	status = "loading file";
 
 	CharString utf8_path = p_path.utf8();
@@ -347,6 +355,7 @@ void MpvCore::stop() {
 	playback_state = PlaybackState::STOPPED;
 	file_loaded = false;
 	eof_reached = false;
+	seeking = false;
 	status = "stop issued";
 }
 
@@ -357,15 +366,16 @@ void MpvCore::seek(double p_seconds) {
 	}
 
 	time_pos = std::max(0.0, p_seconds);
+	seeking = true;
 	const String seconds_string = String::num(time_pos);
 	const CharString seconds_utf8 = seconds_string.utf8();
 	const char *command[] = { "seek", seconds_utf8.get_data(), "absolute", nullptr };
-	const int result = get_dispatch().command(get_handle(), command);
+	const int result = get_dispatch().command_async(get_handle(), 0, command);
 	if (result < 0) {
 		status = "seek failed: " + format_mpv_error(result);
 		return;
 	}
-	status = "seek issued";
+	status = "seek queued";
 }
 
 void MpvCore::set_video_output_mode(VideoOutputMode p_mode) {
@@ -397,6 +407,7 @@ MpvCore::PollResult MpvCore::poll() {
 			case MPV_EVENT_FILE_LOADED:
 				file_loaded = true;
 				eof_reached = false;
+				seeking = false;
 				status = "file loaded";
 				result.file_loaded = true;
 				break;
@@ -404,6 +415,7 @@ MpvCore::PollResult MpvCore::poll() {
 				playback_state = PlaybackState::STOPPED;
 				file_loaded = false;
 				eof_reached = true;
+				seeking = false;
 				time_pos = 0.0;
 				video_width = 0;
 				video_height = 0;
@@ -417,9 +429,11 @@ MpvCore::PollResult MpvCore::poll() {
 				result.playback_finished = true;
 			} break;
 			case MPV_EVENT_SEEK:
+				seeking = true;
 				status = "seeking";
 				break;
 			case MPV_EVENT_PLAYBACK_RESTART:
+				seeking = false;
 				status = "playback restarted";
 				break;
 			case MPV_EVENT_VIDEO_RECONFIG:
@@ -440,6 +454,11 @@ MpvCore::PollResult MpvCore::poll() {
 			default:
 				break;
 		}
+	}
+
+	if (seeking) {
+		result.status = status;
+		return result;
 	}
 
 	double new_time_pos = time_pos;
@@ -514,6 +533,10 @@ int MpvCore::get_video_height() const {
 
 bool MpvCore::is_playing() const {
 	return playback_state == PlaybackState::PLAYING;
+}
+
+bool MpvCore::is_seeking() const {
+	return seeking;
 }
 
 MpvCore::PlaybackState MpvCore::get_playback_state() const {

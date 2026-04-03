@@ -378,7 +378,8 @@ void MPVPlayer::_sync_mpv_state() {
 	}
 
 	const libmpv_zero::MpvCore::PollResult poll_result = mpv_core->poll();
-	if (video_output_backend) {
+	const bool seeking_now = mpv_core->is_seeking();
+	if (video_output_backend && !seeking_now) {
 		video_output_backend->update();
 		video_status = video_output_backend->get_status();
 	}
@@ -425,9 +426,11 @@ void MPVPlayer::_sync_mpv_state() {
 		}
 	}
 
-	const double duration = mpv_core->get_duration();
-	if (duration != last_known_duration) {
-		last_known_duration = duration;
+	if (!mpv_core->is_seeking()) {
+		const double duration = mpv_core->get_duration();
+		if (duration != last_known_duration) {
+			last_known_duration = duration;
+		}
 	}
 
 	if (poll_result.failed) {
