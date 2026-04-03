@@ -2,9 +2,12 @@
 #include "mini_mpv_client.h"
 
 #include <algorithm>
+#include <chrono>
 
+#include <godot_cpp/classes/os.hpp>
 #include <godot_cpp/classes/project_settings.hpp>
 #include <godot_cpp/variant/char_string.hpp>
+#include <godot_cpp/variant/utility_functions.hpp>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -15,6 +18,8 @@ using namespace godot;
 namespace libmpv_zero {
 
 namespace {
+
+using Clock = std::chrono::steady_clock;
 
 struct MpvDispatch {
 #ifdef _WIN32
@@ -28,6 +33,7 @@ struct MpvDispatch {
 	PFN_mpv_command command = nullptr;
 	PFN_mpv_command_async command_async = nullptr;
 	PFN_mpv_set_property_string set_property_string = nullptr;
+	PFN_mpv_set_property_async set_property_async = nullptr;
 	PFN_mpv_get_property get_property = nullptr;
 	PFN_mpv_get_property_string get_property_string = nullptr;
 	PFN_mpv_free free_fn = nullptr;
@@ -105,6 +111,26 @@ bool get_mpv_int64_property(const char *p_name, int64_t &r_value) {
 	return false;
 }
 
+bool is_load_trace_enabled() {
+	static const bool enabled = []() {
+		OS *os = OS::get_singleton();
+		return os && os->get_environment("LIBMPV_ZERO_TRACE_LOAD") == "1";
+	}();
+	return enabled;
+}
+
+int64_t load_trace_millis_since_start() {
+	static const Clock::time_point start = Clock::now();
+	return std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - start).count();
+}
+
+void trace_load_log(const String &p_message) {
+	if (!is_load_trace_enabled()) {
+		return;
+	}
+	UtilityFunctions::print(vformat("[load-trace %dms] %s", load_trace_millis_since_start(), p_message));
+}
+
 bool load_mpv_dispatch(String &r_error) {
 #ifdef _WIN32
 	MpvDispatch &dispatch = get_dispatch();
@@ -137,6 +163,7 @@ bool load_mpv_dispatch(String &r_error) {
 	dispatch.command = reinterpret_cast<PFN_mpv_command>(GetProcAddress(dispatch.library, "mpv_command"));
 	dispatch.command_async = reinterpret_cast<PFN_mpv_command_async>(GetProcAddress(dispatch.library, "mpv_command_async"));
 	dispatch.set_property_string = reinterpret_cast<PFN_mpv_set_property_string>(GetProcAddress(dispatch.library, "mpv_set_property_string"));
+	dispatch.set_property_async = reinterpret_cast<PFN_mpv_set_property_async>(GetProcAddress(dispatch.library, "mpv_set_property_async"));
 	dispatch.get_property = reinterpret_cast<PFN_mpv_get_property>(GetProcAddress(dispatch.library, "mpv_get_property"));
 	dispatch.get_property_string = reinterpret_cast<PFN_mpv_get_property_string>(GetProcAddress(dispatch.library, "mpv_get_property_string"));
 	dispatch.free_fn = reinterpret_cast<PFN_mpv_free>(GetProcAddress(dispatch.library, "mpv_free"));
@@ -259,6 +286,8 @@ bool MpvCore::initialize() {
 	file_loaded = false;
 	eof_reached = false;
 	seeking = false;
+	loading = false;
+	awaiting_playback_restart = false;
 	status = "libmpv initialized";
 	return true;
 }
@@ -275,6 +304,8 @@ void MpvCore::shutdown() {
 	file_loaded = false;
 	eof_reached = false;
 	seeking = false;
+	loading = false;
+	awaiting_playback_restart = false;
 	loaded_path = "";
 	time_pos = 0.0;
 	duration = 0.0;
@@ -299,14 +330,23 @@ void MpvCore::load_file(const String &p_path) {
 	file_loaded = false;
 	eof_reached = false;
 	seeking = false;
+	loading = true;
+	awaiting_playback_restart = false;
 	status = "loading file";
 
 	CharString utf8_path = p_path.utf8();
 	const char *command[] = { "loadfile", utf8_path.get_data(), nullptr };
-	const int result = get_dispatch().command(get_handle(), command);
+	const Clock::time_point start = Clock::now();
+	const int result = get_dispatch().command_async(get_handle(), 0, command);
+	const int64_t duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - start).count();
 	if (result < 0) {
+		loading = false;
 		status = "loadfile failed: " + format_mpv_error(result);
+		trace_load_log(vformat("loadfile command_async failed in %dms: %s", duration_ms, status));
+		return;
 	}
+	status = "loadfile queued";
+	trace_load_log(vformat("loadfile command_async queued in %dms", duration_ms));
 }
 
 void MpvCore::play() {
@@ -315,7 +355,10 @@ void MpvCore::play() {
 		return;
 	}
 
-	const int result = get_dispatch().set_property_string(get_handle(), "pause", "no");
+	int pause_flag = 0;
+	const int result = get_dispatch().set_property_async
+			? get_dispatch().set_property_async(get_handle(), 0, "pause", MPV_FORMAT_FLAG, &pause_flag)
+			: get_dispatch().set_property_string(get_handle(), "pause", "no");
 	if (result < 0) {
 		status = "play failed: " + format_mpv_error(result);
 		return;
@@ -332,7 +375,10 @@ void MpvCore::pause() {
 	}
 
 	if (playback_state == PlaybackState::PLAYING) {
-		const int result = get_dispatch().set_property_string(get_handle(), "pause", "yes");
+		int pause_flag = 1;
+		const int result = get_dispatch().set_property_async
+				? get_dispatch().set_property_async(get_handle(), 0, "pause", MPV_FORMAT_FLAG, &pause_flag)
+				: get_dispatch().set_property_string(get_handle(), "pause", "yes");
 		if (result < 0) {
 			status = "pause failed: " + format_mpv_error(result);
 			return;
@@ -345,7 +391,7 @@ void MpvCore::pause() {
 void MpvCore::stop() {
 	if (initialized) {
 		const char *command[] = { "stop", nullptr };
-		const int result = get_dispatch().command(get_handle(), command);
+		const int result = get_dispatch().command_async(get_handle(), 0, command);
 		if (result < 0) {
 			status = "stop failed: " + format_mpv_error(result);
 			return;
@@ -356,6 +402,8 @@ void MpvCore::stop() {
 	file_loaded = false;
 	eof_reached = false;
 	seeking = false;
+	loading = false;
+	awaiting_playback_restart = false;
 	status = "stop issued";
 }
 
@@ -402,13 +450,18 @@ MpvCore::PollResult MpvCore::poll() {
 
 		switch (event->event_id) {
 			case MPV_EVENT_START_FILE:
+				loading = true;
 				status = "starting file";
+				trace_load_log("event start_file");
 				break;
 			case MPV_EVENT_FILE_LOADED:
 				file_loaded = true;
 				eof_reached = false;
 				seeking = false;
+				loading = false;
+				awaiting_playback_restart = true;
 				status = "file loaded";
+				trace_load_log("event file_loaded");
 				result.file_loaded = true;
 				break;
 			case MPV_EVENT_END_FILE: {
@@ -416,16 +469,19 @@ MpvCore::PollResult MpvCore::poll() {
 				file_loaded = false;
 				eof_reached = true;
 				seeking = false;
+				awaiting_playback_restart = false;
 				time_pos = 0.0;
 				video_width = 0;
 				video_height = 0;
 				const mpv_event_end_file *end_file = static_cast<const mpv_event_end_file *>(event->data);
 				if (end_file && end_file->reason == MPV_END_FILE_REASON_ERROR) {
+					loading = false;
 					status = "playback ended with error: " + format_mpv_error(end_file->error);
 					result.failed = true;
 				} else {
 					status = "playback finished";
 				}
+				trace_load_log("event end_file");
 				result.playback_finished = true;
 			} break;
 			case MPV_EVENT_SEEK:
@@ -434,7 +490,9 @@ MpvCore::PollResult MpvCore::poll() {
 				break;
 			case MPV_EVENT_PLAYBACK_RESTART:
 				seeking = false;
+				awaiting_playback_restart = false;
 				status = "playback restarted";
+				result.playback_restarted = true;
 				break;
 			case MPV_EVENT_VIDEO_RECONFIG:
 				result.video_reconfigured = true;
@@ -457,6 +515,16 @@ MpvCore::PollResult MpvCore::poll() {
 	}
 
 	if (seeking) {
+		result.status = status;
+		return result;
+	}
+
+	if (loading && !file_loaded) {
+		result.status = status;
+		return result;
+	}
+
+	if (awaiting_playback_restart) {
 		result.status = status;
 		return result;
 	}
@@ -513,13 +581,6 @@ double MpvCore::get_time_pos() const {
 }
 
 double MpvCore::get_duration() const {
-	if (initialized) {
-		double duration_value = 0.0;
-		if (get_dispatch().get_property(get_handle(), "duration", MPV_FORMAT_DOUBLE, &duration_value) >= 0) {
-			return duration_value;
-		}
-	}
-
 	return duration;
 }
 
@@ -537,6 +598,10 @@ bool MpvCore::is_playing() const {
 
 bool MpvCore::is_seeking() const {
 	return seeking;
+}
+
+bool MpvCore::is_loading() const {
+	return loading;
 }
 
 MpvCore::PlaybackState MpvCore::get_playback_state() const {

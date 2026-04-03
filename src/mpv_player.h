@@ -49,6 +49,7 @@ private:
 	String video_status = "idle";
 	String pending_load_path;
 	bool pending_play = false;
+	bool waiting_for_playback_restart = false;
 	bool autoplay = false;
 	bool paused_requested = false;
 	double last_known_duration = 0.0;

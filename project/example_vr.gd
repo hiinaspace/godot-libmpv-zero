@@ -17,6 +17,12 @@ var _media_source := ""
 var _screen_base_height := 2.0
 var _left_controller: XRController3D
 var _right_controller: XRController3D
+var _auto_quit := false
+var _auto_reload_after := 0.0
+var _auto_reload_done := false
+var _trace_frame_gaps := false
+var _frame_gap_threshold_ms := 13.5
+var _reload_in_progress := false
 var _snap_turn_ready := true
 var _left_ax_ready := true
 var _left_by_ready := true
@@ -25,6 +31,9 @@ var _right_by_ready := true
 var xr_interface: XRInterface
 
 func _ready() -> void:
+	_auto_quit = OS.get_environment("LIBMPV_ZERO_AUTOQUIT") == "1"
+	_auto_reload_after = float(OS.get_environment("LIBMPV_ZERO_RELOAD_AFTER"))
+	_trace_frame_gaps = OS.get_environment("LIBMPV_ZERO_TRACE_FRAME_GAPS") == "1"
 	xr_interface = XRServer.find_interface("OpenXR")
 	if xr_interface:
 		if not xr_interface.is_initialized():
@@ -45,8 +54,12 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	_trace_process_gap(delta)
 	_update_xr_movement(delta)
 	_update_xr_media_controls()
+	if not _auto_reload_done and _auto_reload_after > 0.0 and _player.get_playback_position() >= _auto_reload_after:
+		_auto_reload_done = true
+		_reload_media()
 
 
 func _capture_screen_defaults() -> void:
@@ -117,16 +130,26 @@ func _on_video_size_changed(width: int, height: int) -> void:
 
 
 func _on_file_loaded() -> void:
-	pass
+	if _reload_in_progress:
+		_trace_frame_event("file_loaded")
+	_reload_in_progress = false
 
 
 func _on_playback_finished() -> void:
-	pass
+	if _reload_in_progress:
+		_trace_frame_event("playback_finished")
+	if _auto_quit:
+		get_tree().create_timer(2.0).timeout.connect(_quit_after_capture)
 
 
 func _on_playback_error(message: String) -> void:
 	push_warning(message)
 	print("example_vr.gd playback_error: %s" % message)
+
+
+func _quit_after_capture() -> void:
+	if is_inside_tree():
+		get_tree().quit()
 
 
 func _resolve_media_source() -> String:
@@ -174,8 +197,39 @@ func _seek_by(offset_seconds: float) -> void:
 
 
 func _reload_media() -> void:
+	_reload_in_progress = true
+	_trace_frame_event("reload_requested")
 	_player.load(_media_source)
 	_player.play()
+
+
+func _trace_process_gap(delta: float) -> void:
+	if not _trace_frame_gaps:
+		return
+	var delta_ms := delta * 1000.0
+	if delta_ms < _frame_gap_threshold_ms:
+		return
+	var label := "frame_gap"
+	if _reload_in_progress:
+		label = "frame_gap_during_reload"
+	print("example_vr.gd %s: %.2fms pos=%.3f status=%s mpv=%s" % [
+		label,
+		delta_ms,
+		_player.get_playback_position(),
+		_player.get_video_status(),
+		_player.get_mpv_status(),
+	])
+
+
+func _trace_frame_event(name: String) -> void:
+	if not _trace_frame_gaps:
+		return
+	print("example_vr.gd %s at pos=%.3f status=%s mpv=%s" % [
+		name,
+		_player.get_playback_position(),
+		_player.get_video_status(),
+		_player.get_mpv_status(),
+	])
 
 
 func _update_button_edge(controller: XRController3D, action_name: StringName, ready: bool, callback: Callable) -> bool:

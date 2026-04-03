@@ -78,6 +78,7 @@ using PFN_mpv_set_option_string = int (*)(mpv_handle *ctx, const char *name, con
 using PFN_mpv_command = int (*)(mpv_handle *ctx, const char **args);
 using PFN_mpv_command_async = int (*)(mpv_handle *ctx, uint64_t reply_userdata, const char **args);
 using PFN_mpv_set_property_string = int (*)(mpv_handle *ctx, const char *name, const char *data);
+using PFN_mpv_set_property_async = int (*)(mpv_handle *ctx, uint64_t reply_userdata, const char *name, mpv_format format, void *data);
 using PFN_mpv_get_property = int (*)(mpv_handle *ctx, const char *name, mpv_format format, void *data);
 using PFN_mpv_get_property_string = char *(*)(mpv_handle *ctx, const char *name);
 using PFN_mpv_free = void (*)(void *data);

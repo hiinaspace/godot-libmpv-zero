@@ -6,11 +6,40 @@
 #include "video_output_backend.h"
 #include "vk_video_output.h"
 
+#include <chrono>
+
+#include <godot_cpp/classes/os.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/callable_method_pointer.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
 using namespace godot;
+
+namespace {
+
+using Clock = std::chrono::steady_clock;
+
+bool is_load_trace_enabled() {
+	static const bool enabled = []() {
+		OS *os = OS::get_singleton();
+		return os && os->get_environment("LIBMPV_ZERO_TRACE_LOAD") == "1";
+	}();
+	return enabled;
+}
+
+int64_t load_trace_millis_since_start() {
+	static const Clock::time_point start = Clock::now();
+	return std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - start).count();
+}
+
+void trace_load_log(const String &p_message) {
+	if (!is_load_trace_enabled()) {
+		return;
+	}
+	UtilityFunctions::print(vformat("[load-trace %dms] %s", load_trace_millis_since_start(), p_message));
+}
+
+} // namespace
 
 MPVPlayer::MPVPlayer() :
 		mpv_core(std::make_unique<libmpv_zero::MpvCore>()),
@@ -164,11 +193,11 @@ void MPVPlayer::load(const String &p_source) {
 }
 
 void MPVPlayer::load_file(const String &p_path) {
+	trace_load_log(vformat("MPVPlayer::load_file requested %s", p_path));
 	source = p_path;
 	audio_bridge->clear_queued_audio();
 	audio_bridge->set_playback_active(false);
 	paused_requested = false;
-	video_texture.unref();
 	_sync_output_texture();
 	if (video_output_backend && !video_output_backend->is_ready_for_playback()) {
 		pending_load_path = p_path;
@@ -178,6 +207,7 @@ void MPVPlayer::load_file(const String &p_path) {
 
 	pending_load_path = "";
 	pending_play = false;
+	waiting_for_playback_restart = false;
 	mpv_core->load_file(p_path);
 }
 
@@ -185,13 +215,16 @@ void MPVPlayer::play() {
 	paused_requested = false;
 	audio_bridge->set_playback_active(true);
 	_sync_output_texture();
-	if (video_output_backend && !video_output_backend->is_ready_for_playback()) {
+	if ((video_output_backend && !video_output_backend->is_ready_for_playback()) || (mpv_core && mpv_core->is_loading())) {
 		pending_play = true;
-		video_status = "waiting for video backend";
+		video_status = mpv_core && mpv_core->is_loading() ? "waiting for file load" : "waiting for video backend";
+		trace_load_log("MPVPlayer::play deferred");
 		return;
 	}
 
+	trace_load_log("MPVPlayer::play issued");
 	mpv_core->play();
+	waiting_for_playback_restart = false;
 	_sync_audio_targets();
 }
 
@@ -209,6 +242,7 @@ void MPVPlayer::stop() {
 	audio_bridge->clear_queued_audio();
 	audio_bridge->set_playback_active(false);
 	audio_bridge->set_source_active(false);
+	waiting_for_playback_restart = false;
 	video_texture.unref();
 	_sync_output_texture();
 	_sync_audio_targets();
@@ -378,9 +412,17 @@ void MPVPlayer::_sync_mpv_state() {
 	}
 
 	const libmpv_zero::MpvCore::PollResult poll_result = mpv_core->poll();
-	const bool seeking_now = mpv_core->is_seeking();
-	if (video_output_backend && !seeking_now) {
+	const bool transitioning_now = mpv_core->is_seeking() || mpv_core->is_loading() || waiting_for_playback_restart;
+	if (mpv_core->is_loading()) {
+		trace_load_log("sync: loading active");
+	}
+	if (video_output_backend && !transitioning_now) {
+		const Clock::time_point step_start = Clock::now();
 		video_output_backend->update();
+		const int64_t duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - step_start).count();
+		if (duration_ms >= 5 && mpv_core->is_loading()) {
+			trace_load_log(vformat("sync: backend_update took %dms", duration_ms));
+		}
 		video_status = video_output_backend->get_status();
 	}
 	if (video_output_backend && video_output_backend->is_ready_for_playback()) {
@@ -389,17 +431,25 @@ void MPVPlayer::_sync_mpv_state() {
 			const bool deferred_play = pending_play;
 			pending_load_path = "";
 			pending_play = false;
+			trace_load_log("sync: issuing deferred load");
 			mpv_core->load_file(deferred_path);
-			if (deferred_play) {
+			if (deferred_play && !mpv_core->is_loading()) {
+				trace_load_log("sync: issuing deferred play immediately");
 				mpv_core->play();
+			} else if (deferred_play) {
+				trace_load_log("sync: keeping deferred play pending");
+				pending_play = true;
 			}
-		} else if (pending_play) {
+		} else if (pending_play && !mpv_core->is_loading()) {
 			pending_play = false;
+			trace_load_log("sync: issuing pending play");
 			mpv_core->play();
+			waiting_for_playback_restart = true;
 		}
 	}
 
 	if (poll_result.file_loaded) {
+		trace_load_log("sync: file_loaded");
 		audio_bridge->set_source_active(true);
 		emit_signal("file_loaded");
 	}
@@ -410,6 +460,7 @@ void MPVPlayer::_sync_mpv_state() {
 		audio_bridge->set_playback_active(false);
 		audio_bridge->set_source_active(false);
 		paused_requested = false;
+		waiting_for_playback_restart = false;
 		_sync_output_texture();
 		_sync_audio_targets();
 		if (!poll_result.playback_finished || mpv_core->get_playback_state() == libmpv_zero::MpvCore::PlaybackState::STOPPED) {
@@ -417,6 +468,7 @@ void MPVPlayer::_sync_mpv_state() {
 		}
 	}
 	if (poll_result.video_reconfigured || poll_result.file_loaded) {
+		const Clock::time_point step_start = Clock::now();
 		const int width = mpv_core->get_video_width();
 		const int height = mpv_core->get_video_height();
 		if (width > 0 && height > 0 && (width != last_video_width || height != last_video_height)) {
@@ -424,12 +476,25 @@ void MPVPlayer::_sync_mpv_state() {
 			last_video_height = height;
 			emit_signal("video_size_changed", width, height);
 		}
+		const int64_t duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - step_start).count();
+		if (duration_ms >= 5 && is_load_trace_enabled()) {
+			trace_load_log(vformat("sync: video size branch took %dms", duration_ms));
+		}
 	}
 
-	if (!mpv_core->is_seeking()) {
+	if (poll_result.playback_restarted) {
+		waiting_for_playback_restart = false;
+	}
+
+	if (!transitioning_now) {
+		const Clock::time_point step_start = Clock::now();
 		const double duration = mpv_core->get_duration();
 		if (duration != last_known_duration) {
 			last_known_duration = duration;
+		}
+		const int64_t duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - step_start).count();
+		if (duration_ms >= 5 && is_load_trace_enabled()) {
+			trace_load_log(vformat("sync: get_duration took %dms", duration_ms));
 		}
 	}
 
@@ -438,12 +503,22 @@ void MPVPlayer::_sync_mpv_state() {
 		emit_signal("playback_error", poll_result.status);
 	}
 	if (audio_bridge->consume_configuration_changed()) {
+		const Clock::time_point step_start = Clock::now();
 		_sync_audio_targets();
 		emit_signal("audio_channels_changed", audio_bridge->get_audio_channel_count());
+		const int64_t duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - step_start).count();
+		if (duration_ms >= 5 && is_load_trace_enabled()) {
+			trace_load_log(vformat("sync: audio_config branch took %dms", duration_ms));
+		}
 	}
 	if (poll_result.playback_state_changed) {
+		const Clock::time_point step_start = Clock::now();
 		_sync_output_texture();
 		_sync_audio_targets();
+		const int64_t duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - step_start).count();
+		if (duration_ms >= 5 && is_load_trace_enabled()) {
+			trace_load_log(vformat("sync: playback_state branch took %dms", duration_ms));
+		}
 	}
 }
 

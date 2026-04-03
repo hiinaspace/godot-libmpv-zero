@@ -18,6 +18,7 @@ public:
 		bool playback_finished = false;
 		bool position_changed = false;
 		bool playback_state_changed = false;
+		bool playback_restarted = false;
 		bool video_reconfigured = false;
 		bool audio_reconfigured = false;
 		bool eof_reached = false;
@@ -49,6 +50,7 @@ public:
 	int get_video_height() const;
 	bool is_playing() const;
 	bool is_seeking() const;
+	bool is_loading() const;
 	PlaybackState get_playback_state() const;
 	const godot::String &get_status() const;
 	bool is_initialized() const;
@@ -66,6 +68,8 @@ private:
 	bool file_loaded = false;
 	bool eof_reached = false;
 	bool seeking = false;
+	bool loading = false;
+	bool awaiting_playback_restart = false;
 	int video_width = 0;
 	int video_height = 0;
 	VideoOutputMode video_output_mode = VideoOutputMode::LIBMPV;
