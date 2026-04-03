@@ -2,12 +2,14 @@
 
 #include "mini_mpv_render.h"
 #include "mpv_core.h"
+#include "runtime_library_utils.h"
 
 #include <godot_cpp/classes/rendering_device.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/classes/texture2drd.hpp>
 #include <godot_cpp/core/memory.hpp>
 #include <godot_cpp/variant/callable_method_pointer.hpp>
+#include <memory>
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -24,10 +26,16 @@ void VkVideoOutput::_on_render_update(void *p_context) {
 	}
 }
 
-void VkVideoOutput::_render_frame_on_render_thread_static(uint64_t p_self) {
-	VkVideoOutput *self = reinterpret_cast<VkVideoOutput *>(p_self);
-	if (self) {
-		self->_render_frame_on_render_thread();
+void VkVideoOutput::_render_frame_on_render_thread_static(uint64_t p_context) {
+	std::unique_ptr<RenderCallbackContext> context(reinterpret_cast<RenderCallbackContext *>(p_context));
+	if (!context) {
+		return;
+	}
+	if (!context->lifetime.lock()) {
+		return;
+	}
+	if (context->owner) {
+		context->owner->_render_frame_on_render_thread();
 	}
 }
 
@@ -81,7 +89,18 @@ bool VkVideoOutput::_load_render_dispatch() {
 		return true;
 	}
 
-	dispatch.library = LoadLibraryW(L"libmpv-2.dll");
+	String dll_path;
+	String error;
+	if (resolve_windows_runtime_library_path("libmpv-2.dll", dll_path, error)) {
+		String dll_dir = dll_path.get_base_dir();
+		const Char16String dll_dir_utf16 = dll_dir.utf16();
+		const Char16String dll_path_utf16 = dll_path.utf16();
+		SetDllDirectoryW(reinterpret_cast<LPCWSTR>(dll_dir_utf16.get_data()));
+		dispatch.library = LoadLibraryW(reinterpret_cast<LPCWSTR>(dll_path_utf16.get_data()));
+	}
+	if (!dispatch.library) {
+		dispatch.library = LoadLibraryW(L"libmpv-2.dll");
+	}
 	dispatch.vulkan_library = LoadLibraryW(L"vulkan-1.dll");
 	if (!dispatch.library || !dispatch.vulkan_library) {
 		status = "failed to load Vulkan libmpv runtime";
@@ -301,6 +320,7 @@ void VkVideoOutput::attach(Node *p_owner, MpvCore *p_mpv_core, const Callable &p
 
 	mpv_core = p_mpv_core;
 	render_thread_service = memnew(RenderThreadService);
+	render_callback_lifetime = std::make_shared<int>(0);
 	texture_ready_callback = p_texture_ready;
 	probe_failed_callback = p_probe_failed;
 	requested_width = 0;
@@ -409,11 +429,13 @@ void VkVideoOutput::update() {
 		return;
 	}
 
-	rendering_server->call_on_render_thread(callable_mp_static(&VkVideoOutput::_render_frame_on_render_thread_static).bind(reinterpret_cast<uint64_t>(this)));
+	RenderCallbackContext *context = new RenderCallbackContext{ this, render_callback_lifetime };
+	rendering_server->call_on_render_thread(callable_mp_static(&VkVideoOutput::_render_frame_on_render_thread_static).bind(reinterpret_cast<uint64_t>(context)));
 	status = vformat("queued Vulkan frame %dx%d", slots[render_slot_index].handle.width, slots[render_slot_index].handle.height);
 }
 
 void VkVideoOutput::detach() {
+	render_callback_lifetime.reset();
 	if (render_context && dispatch.free) {
 		dispatch.free(render_context);
 		render_context = nullptr;

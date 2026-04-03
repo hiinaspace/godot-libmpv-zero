@@ -40,7 +40,7 @@ get_target_property(GODOTCPP_PLATFORM godot::cpp GODOTCPP_PLATFORM)
 project(godot-libmpv-zero
     VERSION 1.0
     DESCRIPTION "Godot 4 GDExtension experiments for libmpv-backed zero-copy video playback."
-    HOMEPAGE_URL "https://github.com/openai/godot-libmpv-zero"
+    HOMEPAGE_URL "https://github.com/hiinaspace/godot-libmpv-zero"
     LANGUAGES CXX
 )
 
@@ -54,6 +54,8 @@ target_sources(${LIBNAME}
     src/channel_audio_stream.h
     src/mpv_core.cpp
     src/mpv_core.h
+    src/runtime_library_utils.cpp
+    src/runtime_library_utils.h
     src/mini_mpv_client.h
     src/audio_bridge.cpp
     src/audio_bridge.h

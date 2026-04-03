@@ -1,5 +1,6 @@
 #include "mpv_core.h"
 #include "mini_mpv_client.h"
+#include "runtime_library_utils.h"
 
 #include <algorithm>
 #include <chrono>
@@ -46,9 +47,9 @@ MpvDispatch &get_dispatch() {
 	return dispatch;
 }
 
-mpv_handle *&get_handle() {
-	static mpv_handle *handle = nullptr;
-	return handle;
+int &get_dispatch_ref_count() {
+	static int ref_count = 0;
+	return ref_count;
 }
 
 String format_mpv_error(int p_error) {
@@ -63,15 +64,14 @@ String format_mpv_error(int p_error) {
 	return vformat("mpv error %d", p_error);
 }
 
-bool get_mpv_double_property(const char *p_name, double &r_value) {
+bool get_mpv_double_property(mpv_handle *p_handle, const char *p_name, double &r_value) {
 	MpvDispatch &dispatch = get_dispatch();
-	mpv_handle *handle = get_handle();
-	if (!dispatch.get_property || !handle) {
+	if (!dispatch.get_property || !p_handle) {
 		return false;
 	}
 
 	double value = 0.0;
-	if (dispatch.get_property(handle, p_name, MPV_FORMAT_DOUBLE, &value) >= 0) {
+	if (dispatch.get_property(p_handle, p_name, MPV_FORMAT_DOUBLE, &value) >= 0) {
 		r_value = value;
 		return true;
 	}
@@ -79,15 +79,14 @@ bool get_mpv_double_property(const char *p_name, double &r_value) {
 	return false;
 }
 
-bool get_mpv_flag_property(const char *p_name, bool &r_value) {
+bool get_mpv_flag_property(mpv_handle *p_handle, const char *p_name, bool &r_value) {
 	MpvDispatch &dispatch = get_dispatch();
-	mpv_handle *handle = get_handle();
-	if (!dispatch.get_property || !handle) {
+	if (!dispatch.get_property || !p_handle) {
 		return false;
 	}
 
 	int flag = 0;
-	if (dispatch.get_property(handle, p_name, MPV_FORMAT_FLAG, &flag) >= 0) {
+	if (dispatch.get_property(p_handle, p_name, MPV_FORMAT_FLAG, &flag) >= 0) {
 		r_value = flag != 0;
 		return true;
 	}
@@ -95,15 +94,14 @@ bool get_mpv_flag_property(const char *p_name, bool &r_value) {
 	return false;
 }
 
-bool get_mpv_int64_property(const char *p_name, int64_t &r_value) {
+bool get_mpv_int64_property(mpv_handle *p_handle, const char *p_name, int64_t &r_value) {
 	MpvDispatch &dispatch = get_dispatch();
-	mpv_handle *handle = get_handle();
-	if (!dispatch.get_property || !handle) {
+	if (!dispatch.get_property || !p_handle) {
 		return false;
 	}
 
 	int64_t value = 0;
-	if (dispatch.get_property(handle, p_name, MPV_FORMAT_INT64, &value) >= 0) {
+	if (dispatch.get_property(p_handle, p_name, MPV_FORMAT_INT64, &value) >= 0) {
 		r_value = value;
 		return true;
 	}
@@ -138,13 +136,15 @@ bool load_mpv_dispatch(String &r_error) {
 		return true;
 	}
 
-	String dll_path = ProjectSettings::get_singleton()->globalize_path("res://bin/windows/libmpv-2.dll");
-	String dll_dir = dll_path.get_base_dir();
-	const Char16String dll_dir_utf16 = dll_dir.utf16();
-	const Char16String dll_path_utf16 = dll_path.utf16();
-	SetDllDirectoryW(reinterpret_cast<LPCWSTR>(dll_dir_utf16.get_data()));
-	dispatch.library = LoadLibraryW(reinterpret_cast<LPCWSTR>(dll_path_utf16.get_data()));
-	String loaded_from = dll_path;
+	String dll_path;
+	if (resolve_windows_runtime_library_path("libmpv-2.dll", dll_path, r_error)) {
+		String dll_dir = dll_path.get_base_dir();
+		const Char16String dll_dir_utf16 = dll_dir.utf16();
+		const Char16String dll_path_utf16 = dll_path.utf16();
+		SetDllDirectoryW(reinterpret_cast<LPCWSTR>(dll_dir_utf16.get_data()));
+		dispatch.library = LoadLibraryW(reinterpret_cast<LPCWSTR>(dll_path_utf16.get_data()));
+	}
+	String loaded_from = dll_path.is_empty() ? String("PATH/libmpv-2.dll") : dll_path;
 	if (!dispatch.library) {
 		dispatch.library = LoadLibraryW(L"libmpv-2.dll");
 		loaded_from = "PATH/libmpv-2.dll";
@@ -250,7 +250,6 @@ bool MpvCore::initialize() {
 	}
 
 	MpvDispatch &dispatch = get_dispatch();
-	mpv_handle *&handle = get_handle();
 	handle = dispatch.create();
 	if (!handle) {
 		status = "mpv_create failed";
@@ -283,6 +282,7 @@ bool MpvCore::initialize() {
 	}
 
 	initialized = true;
+	get_dispatch_ref_count() += 1;
 	file_loaded = false;
 	eof_reached = false;
 	seeking = false;
@@ -293,10 +293,12 @@ bool MpvCore::initialize() {
 }
 
 void MpvCore::shutdown() {
-	mpv_handle *&handle = get_handle();
 	if (handle) {
 		get_dispatch().terminate_destroy(handle);
 		handle = nullptr;
+		if (get_dispatch_ref_count() > 0) {
+			get_dispatch_ref_count() -= 1;
+		}
 	}
 
 	initialized = false;
@@ -311,7 +313,9 @@ void MpvCore::shutdown() {
 	duration = 0.0;
 	video_width = 0;
 	video_height = 0;
-	unload_mpv_dispatch();
+	if (get_dispatch_ref_count() == 0) {
+		unload_mpv_dispatch();
+	}
 	status = "mpv shut down";
 }
 
@@ -337,7 +341,7 @@ void MpvCore::load_file(const String &p_path) {
 	CharString utf8_path = p_path.utf8();
 	const char *command[] = { "loadfile", utf8_path.get_data(), nullptr };
 	const Clock::time_point start = Clock::now();
-	const int result = get_dispatch().command_async(get_handle(), 0, command);
+	const int result = get_dispatch().command_async(handle, 0, command);
 	const int64_t duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - start).count();
 	if (result < 0) {
 		loading = false;
@@ -357,8 +361,8 @@ void MpvCore::play() {
 
 	int pause_flag = 0;
 	const int result = get_dispatch().set_property_async
-			? get_dispatch().set_property_async(get_handle(), 0, "pause", MPV_FORMAT_FLAG, &pause_flag)
-			: get_dispatch().set_property_string(get_handle(), "pause", "no");
+			? get_dispatch().set_property_async(handle, 0, "pause", MPV_FORMAT_FLAG, &pause_flag)
+			: get_dispatch().set_property_string(handle, "pause", "no");
 	if (result < 0) {
 		status = "play failed: " + format_mpv_error(result);
 		return;
@@ -377,8 +381,8 @@ void MpvCore::pause() {
 	if (playback_state == PlaybackState::PLAYING) {
 		int pause_flag = 1;
 		const int result = get_dispatch().set_property_async
-				? get_dispatch().set_property_async(get_handle(), 0, "pause", MPV_FORMAT_FLAG, &pause_flag)
-				: get_dispatch().set_property_string(get_handle(), "pause", "yes");
+				? get_dispatch().set_property_async(handle, 0, "pause", MPV_FORMAT_FLAG, &pause_flag)
+				: get_dispatch().set_property_string(handle, "pause", "yes");
 		if (result < 0) {
 			status = "pause failed: " + format_mpv_error(result);
 			return;
@@ -391,7 +395,7 @@ void MpvCore::pause() {
 void MpvCore::stop() {
 	if (initialized) {
 		const char *command[] = { "stop", nullptr };
-		const int result = get_dispatch().command_async(get_handle(), 0, command);
+		const int result = get_dispatch().command_async(handle, 0, command);
 		if (result < 0) {
 			status = "stop failed: " + format_mpv_error(result);
 			return;
@@ -418,7 +422,7 @@ void MpvCore::seek(double p_seconds) {
 	const String seconds_string = String::num(time_pos);
 	const CharString seconds_utf8 = seconds_string.utf8();
 	const char *command[] = { "seek", seconds_utf8.get_data(), "absolute", nullptr };
-	const int result = get_dispatch().command_async(get_handle(), 0, command);
+	const int result = get_dispatch().command_async(handle, 0, command);
 	if (result < 0) {
 		status = "seek failed: " + format_mpv_error(result);
 		return;
@@ -443,7 +447,7 @@ MpvCore::PollResult MpvCore::poll() {
 	}
 
 	mpv_event *event = nullptr;
-	while ((event = get_dispatch().wait_event(get_handle(), 0.0)) != nullptr) {
+	while ((event = get_dispatch().wait_event(handle, 0.0)) != nullptr) {
 		if (event->event_id == MPV_EVENT_NONE) {
 			break;
 		}
@@ -530,28 +534,28 @@ MpvCore::PollResult MpvCore::poll() {
 	}
 
 	double new_time_pos = time_pos;
-	if (get_mpv_double_property("time-pos", new_time_pos) && new_time_pos != time_pos) {
+	if (get_mpv_double_property(handle, "time-pos", new_time_pos) && new_time_pos != time_pos) {
 		time_pos = new_time_pos;
 		result.position_changed = true;
 	}
 
 	double new_duration = duration;
-	if (get_mpv_double_property("duration", new_duration)) {
+	if (get_mpv_double_property(handle, "duration", new_duration)) {
 		duration = new_duration;
 	}
 
 	int64_t new_width = video_width;
-	if (get_mpv_int64_property("width", new_width)) {
+	if (get_mpv_int64_property(handle, "width", new_width)) {
 		video_width = static_cast<int>(new_width);
 	}
 
 	int64_t new_height = video_height;
-	if (get_mpv_int64_property("height", new_height)) {
+	if (get_mpv_int64_property(handle, "height", new_height)) {
 		video_height = static_cast<int>(new_height);
 	}
 
 	bool paused = playback_state == PlaybackState::PAUSED;
-	if (get_mpv_flag_property("pause", paused)) {
+	if (get_mpv_flag_property(handle, "pause", paused)) {
 		const PlaybackState new_state = file_loaded ? (paused ? PlaybackState::PAUSED : PlaybackState::PLAYING) : PlaybackState::STOPPED;
 		if (new_state != playback_state) {
 			playback_state = new_state;
@@ -560,7 +564,7 @@ MpvCore::PollResult MpvCore::poll() {
 	}
 
 	bool new_eof_reached = eof_reached;
-	if (get_mpv_flag_property("eof-reached", new_eof_reached) && new_eof_reached != eof_reached) {
+	if (get_mpv_flag_property(handle, "eof-reached", new_eof_reached) && new_eof_reached != eof_reached) {
 		eof_reached = new_eof_reached;
 		result.eof_reached = eof_reached;
 		if (eof_reached) {
@@ -617,7 +621,7 @@ bool MpvCore::is_initialized() const {
 }
 
 void *MpvCore::get_native_handle() const {
-	return get_handle();
+	return handle;
 }
 
 bool MpvCore::has_loaded_file() const {

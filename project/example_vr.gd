@@ -1,6 +1,6 @@
 extends Node3D
 
-const DEFAULT_MEDIA_SOURCE := "https://file.vrg.party/ichigoova01.m3u8"
+const DEFAULT_MEDIA_SOURCE := "res://smoke_test_lr_sync.mp4"
 const MOVE_SPEED := 3.0
 const SNAP_TURN_ANGLE := deg_to_rad(30.0)
 const STICK_DEADZONE := 0.2

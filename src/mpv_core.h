@@ -59,6 +59,7 @@ public:
 	VideoOutputMode get_video_output_mode() const;
 
 private:
+	mpv_handle *handle = nullptr;
 	bool initialized = false;
 	godot::String loaded_path;
 	double time_pos = 0.0;

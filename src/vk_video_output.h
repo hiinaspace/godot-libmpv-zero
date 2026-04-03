@@ -6,6 +6,7 @@
 
 #include <array>
 #include <atomic>
+#include <memory>
 #include <vector>
 
 #include <godot_cpp/classes/texture2drd.hpp>
@@ -46,8 +47,13 @@ private:
 		PFN_vkGetInstanceProcAddr get_instance_proc_addr = nullptr;
 	};
 
+	struct RenderCallbackContext {
+		VkVideoOutput *owner = nullptr;
+		std::weak_ptr<int> lifetime;
+	};
+
 	static void _on_render_update(void *p_context);
-	static void _render_frame_on_render_thread_static(uint64_t p_self);
+	static void _render_frame_on_render_thread_static(uint64_t p_context);
 	void _render_frame_on_render_thread();
 	bool _load_render_dispatch();
 	void _unload_render_dispatch();
@@ -74,6 +80,7 @@ private:
 	std::atomic_int update_callback_count = 0;
 	std::atomic_int last_render_result = 0;
 	std::atomic_int last_rendered_slot = -1;
+	std::shared_ptr<int> render_callback_lifetime;
 	bool attach_logged = false;
 	bool texture_request_logged = false;
 	bool texture_ready_logged = false;
