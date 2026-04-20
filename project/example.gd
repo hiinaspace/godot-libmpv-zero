@@ -2,7 +2,7 @@ extends Node3D
 
 const MOVE_SPEED := 3.5
 const TURN_SPEED := 1.8
-const DEFAULT_MEDIA_SOURCE := "res://smoke_test_lr_sync.mp4"
+const DEFAULT_MEDIA_SOURCE := "https://dn710604.ca.archive.org/0/items/BigBuckBunny_124/Content/big_buck_bunny_720p_surround.mp4"
 const SEEK_STEP := 5.0
 
 @onready var _camera: Camera3D = $Camera3D

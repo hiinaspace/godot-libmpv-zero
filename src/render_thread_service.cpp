@@ -2,6 +2,8 @@
 
 #include "mini_vulkan.h"
 
+#include <godot_cpp/classes/rd_texture_format.hpp>
+#include <godot_cpp/classes/rd_texture_view.hpp>
 #include <godot_cpp/classes/rendering_device.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/core/error_macros.hpp>
@@ -289,80 +291,27 @@ void RenderThreadService::_create_external_texture_on_render_thread() {
 		return;
 	}
 
-	VulkanDispatch dispatch;
-	String dispatch_error;
-	if (!vk_load_dispatch(instance, physical_device, device, dispatch, dispatch_error)) {
-		result.status = dispatch_error;
-		std::lock_guard<std::mutex> lock(mutex);
-		pending_result = result;
-		return;
-	}
+	Ref<RDTextureFormat> texture_format;
+	texture_format.instantiate();
+	texture_format->set_width(request.width);
+	texture_format->set_height(request.height);
+	texture_format->set_depth(1);
+	texture_format->set_array_layers(1);
+	texture_format->set_mipmaps(1);
+	texture_format->set_texture_type(RenderingDevice::TEXTURE_TYPE_2D);
+	texture_format->set_samples(RenderingDevice::TEXTURE_SAMPLES_1);
+	texture_format->set_format(RenderingDevice::DATA_FORMAT_R8G8B8A8_UNORM);
+	texture_format->set_usage_bits(usage_bits);
+	texture_format->add_shareable_format(RenderingDevice::DATA_FORMAT_R8G8B8A8_UNORM);
+	texture_format->add_shareable_format(RenderingDevice::DATA_FORMAT_R8G8B8A8_SRGB);
 
-	VkImage image = nullptr;
-	VkDeviceMemory image_memory = nullptr;
+	Ref<RDTextureView> texture_view;
+	texture_view.instantiate();
 
-	const VkImageCreateInfo image_create_info = {
-		VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-		nullptr,
-		0,
-		VK_IMAGE_TYPE_2D,
-		VK_FORMAT_R8G8B8A8_UNORM,
-		{ request.width, request.height, 1 },
-		1,
-		1,
-		VK_SAMPLE_COUNT_1_BIT,
-		VK_IMAGE_TILING_OPTIMAL,
-		VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
-		VK_SHARING_MODE_EXCLUSIVE,
-		0,
-		nullptr,
-		VK_IMAGE_LAYOUT_UNDEFINED
-	};
-
-	if (dispatch.create_image(device, &image_create_info, nullptr, &image) != VK_SUCCESS || !image) {
-		vk_unload_dispatch(dispatch);
-		result.status = "vkCreateImage failed";
-		std::lock_guard<std::mutex> lock(mutex);
-		pending_result = result;
-		return;
-	}
-
-	VkMemoryRequirements memory_requirements = {};
-	dispatch.get_image_memory_requirements(device, image, &memory_requirements);
-
-	VkPhysicalDeviceMemoryProperties memory_properties = {};
-	dispatch.get_physical_device_memory_properties(physical_device, &memory_properties);
-
-	uint32_t memory_type_index = 0;
-	if (!vk_find_memory_type(memory_properties, memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, memory_type_index)) {
-		vk_destroy_external_image(dispatch, device, image, image_memory);
-		vk_unload_dispatch(dispatch);
-		result.status = "failed to find Vulkan memory type";
-		std::lock_guard<std::mutex> lock(mutex);
-		pending_result = result;
-		return;
-	}
-
-	const VkMemoryAllocateInfo memory_allocate_info = {
-		VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-		nullptr,
-		memory_requirements.size,
-		memory_type_index
-	};
-
-	if (dispatch.allocate_memory(device, &memory_allocate_info, nullptr, &image_memory) != VK_SUCCESS || !image_memory) {
-		vk_destroy_external_image(dispatch, device, image, image_memory);
-		vk_unload_dispatch(dispatch);
-		result.status = "vkAllocateMemory failed";
-		std::lock_guard<std::mutex> lock(mutex);
-		pending_result = result;
-		return;
-	}
-
-	if (dispatch.bind_image_memory(device, image, image_memory, 0) != VK_SUCCESS) {
-		vk_destroy_external_image(dispatch, device, image, image_memory);
-		vk_unload_dispatch(dispatch);
-		result.status = "vkBindImageMemory failed";
+	TypedArray<PackedByteArray> initial_data;
+	result.wrapped_texture = rendering_device->texture_create(texture_format, texture_view, initial_data);
+	if (!rendering_device->texture_is_valid(result.wrapped_texture)) {
+		result.status = "failed to create RenderingDevice texture";
 		std::lock_guard<std::mutex> lock(mutex);
 		pending_result = result;
 		return;
@@ -373,24 +322,13 @@ void RenderThreadService::_create_external_texture_on_render_thread() {
 	result.logical_device = reinterpret_cast<uint64_t>(device);
 	result.queue_handle = reinterpret_cast<uint64_t>(queue);
 	result.queue_family_index = queue_family_index;
-	result.image_handle = reinterpret_cast<uint64_t>(image);
-	result.image_memory_handle = reinterpret_cast<uint64_t>(image_memory);
+	result.image_handle = rendering_device->texture_get_native_handle(result.wrapped_texture);
+	result.image_memory_handle = 0;
 
-	result.wrapped_texture = rendering_device->texture_create_from_extension(
-			RenderingDevice::TEXTURE_TYPE_2D,
-			RenderingDevice::DATA_FORMAT_R8G8B8A8_UNORM,
-			RenderingDevice::TEXTURE_SAMPLES_1,
-			usage_bits,
-			reinterpret_cast<uint64_t>(image),
-			request.width,
-			request.height,
-			1,
-			1);
-
-	if (!rendering_device->texture_is_valid(result.wrapped_texture)) {
-		vk_destroy_external_image(dispatch, device, image, image_memory);
-		vk_unload_dispatch(dispatch);
-		result.status = "failed to wrap external texture from Vulkan image";
+	if (!result.image_handle) {
+		rendering_device->free_rid(result.wrapped_texture);
+		result.wrapped_texture = RID();
+		result.status = "failed to query native texture handle";
 		std::lock_guard<std::mutex> lock(mutex);
 		pending_result = result;
 		return;
@@ -401,16 +339,13 @@ void RenderThreadService::_create_external_texture_on_render_thread() {
 		if (clear_error != OK) {
 			rendering_device->free_rid(result.wrapped_texture);
 			result.wrapped_texture = RID();
-			vk_destroy_external_image(dispatch, device, image, image_memory);
-			vk_unload_dispatch(dispatch);
-			result.status = "failed to clear wrapped external texture";
+			result.status = "failed to clear RenderingDevice texture";
 			std::lock_guard<std::mutex> lock(mutex);
 			pending_result = result;
 			return;
 		}
 	}
 
-	vk_unload_dispatch(dispatch);
 	result.success = true;
 	result.status = "external texture ready";
 	std::lock_guard<std::mutex> lock(mutex);
@@ -447,22 +382,8 @@ void RenderThreadService::_release_external_texture_on_render_thread() {
 		return;
 	}
 
-	// The wrapped RD texture RID appears to outlive our expected ownership boundary
-	// during reload/shutdown, and freeing it here currently races Godot's internal
-	// texture lifetime management. Keep the raw Vulkan image/memory cleanup, but let
-	// the wrapped RID leak for now rather than crash on reload.
-	(void)rendering_device;
-
-	if (release.image_handle || release.image_memory_handle) {
-		VulkanDispatch dispatch;
-		String error;
-		VkDevice device = reinterpret_cast<VkDevice>(release.logical_device);
-		if (device && vk_load_release_dispatch(device, dispatch, error)) {
-			VkImage image = reinterpret_cast<VkImage>(release.image_handle);
-			VkDeviceMemory memory = reinterpret_cast<VkDeviceMemory>(release.image_memory_handle);
-			vk_destroy_external_image(dispatch, device, image, memory);
-			vk_unload_dispatch(dispatch);
-		}
+	if (release.wrapped_texture.is_valid()) {
+		rendering_device->free_rid(release.wrapped_texture);
 	}
 
 	bool should_schedule_next = false;

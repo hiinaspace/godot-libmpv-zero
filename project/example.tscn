@@ -18,6 +18,7 @@ glow_enabled = true
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_ugfer"]
 albedo_color = Color(0.17303586, 0.07935945, 0.0546782, 1)
+roughness = 0.01
 
 [sub_resource type="PlaneMesh" id="PlaneMesh_rujmf"]
 material = SubResource("StandardMaterial3D_ugfer")
@@ -33,6 +34,13 @@ lightmap_size_hint = Vector2i(17, 12)
 material = SubResource("StandardMaterial3D_kkclv")
 add_uv2 = true
 size = Vector2(3, 2)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_n51mc"]
+albedo_texture = ExtResource("2_n51mc")
+albedo_texture_force_srgb = true
+
+[sub_resource type="BoxMesh" id="BoxMesh_8lvy3"]
+material = SubResource("StandardMaterial3D_n51mc")
 
 [node name="Root" type="Node3D" unique_id=785761352]
 script = ExtResource("1_jdh55")
@@ -53,7 +61,6 @@ shadow_enabled = true
 mesh = SubResource("PlaneMesh_rujmf")
 
 [node name="MPVPlayer" type="MPVPlayer" parent="." unique_id=102643760]
-source = "res://smoke_test_lr_sync.mp4"
 output_texture = ExtResource("2_n51mc")
 left_audio_target = NodePath("../Screen/LeftSpeaker")
 right_audio_target = NodePath("../Screen/RightSpeaker")
@@ -67,3 +74,12 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2, 0, 0)
 
 [node name="RightSpeaker" type="AudioStreamPlayer3D" parent="Screen" unique_id=1161907217]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2, 0, 0)
+
+[node name="AreaLight3D" type="AreaLight3D" parent="Screen" unique_id=616314977]
+transform = Transform3D(-1, 0, 8.742278e-08, 0, 1, 0, -8.742278e-08, 0, -1, 0, 0, 0)
+area_size = Vector2(3, 2)
+area_texture = ExtResource("2_n51mc")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="." unique_id=944556916]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2.9539542, 0.6369016, -2.307281)
+mesh = SubResource("BoxMesh_8lvy3")

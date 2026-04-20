@@ -368,7 +368,9 @@ void MpvCore::play() {
 		return;
 	}
 
-	playback_state = PlaybackState::PLAYING;
+	if (file_loaded && !loading) {
+		playback_state = PlaybackState::PLAYING;
+	}
 	status = "play issued";
 }
 

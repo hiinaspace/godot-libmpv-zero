@@ -1,6 +1,6 @@
 extends Node3D
 
-const DEFAULT_MEDIA_SOURCE := "res://smoke_test_lr_sync.mp4"
+const DEFAULT_MEDIA_SOURCE := "https://dn710604.ca.archive.org/0/items/BigBuckBunny_124/Content/big_buck_bunny_720p_surround.mp4"
 const MOVE_SPEED := 3.0
 const SNAP_TURN_ANGLE := deg_to_rad(30.0)
 const STICK_DEADZONE := 0.2

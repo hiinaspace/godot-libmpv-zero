@@ -1,11 +1,10 @@
 #pragma once
 
 #include <godot_cpp/classes/image_texture.hpp>
-#include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
+#include <godot_cpp/classes/texture2drd.hpp>
 #include <godot_cpp/variant/color.hpp>
 #include <godot_cpp/variant/rect2.hpp>
-#include <godot_cpp/variant/rid.hpp>
 #include <godot_cpp/variant/vector2.hpp>
 
 namespace godot {
@@ -17,13 +16,13 @@ private:
 	Ref<Texture2D> live_texture;
 	Ref<Texture2D> placeholder_texture;
 	Ref<ImageTexture> generated_placeholder;
+	Ref<Texture2DRD> presentation_texture;
 	bool playback_active = false;
-	mutable RID texture_rid;
 
 	static void _bind_methods();
 	Ref<Texture2D> _get_active_texture() const;
 	void _ensure_placeholder();
-	void _update_texture_rid();
+	void _update_presentation_texture();
 
 public:
 	MPVTexture();

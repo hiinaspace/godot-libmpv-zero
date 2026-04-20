@@ -199,6 +199,7 @@ void MPVPlayer::load_file(const String &p_path) {
 	audio_bridge->set_playback_active(false);
 	paused_requested = false;
 	_sync_output_texture();
+	_sync_audio_targets();
 	if (video_output_backend && !video_output_backend->is_ready_for_playback()) {
 		pending_load_path = p_path;
 		video_status = "waiting for video backend";
@@ -451,6 +452,7 @@ void MPVPlayer::_sync_mpv_state() {
 	if (poll_result.file_loaded) {
 		trace_load_log("sync: file_loaded");
 		audio_bridge->set_source_active(true);
+		_sync_audio_targets();
 		emit_signal("file_loaded");
 	}
 	if (poll_result.position_changed) {

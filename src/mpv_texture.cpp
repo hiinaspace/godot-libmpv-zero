@@ -1,27 +1,17 @@
 #include "mpv_texture.h"
 
 #include <godot_cpp/classes/image.hpp>
-#include <godot_cpp/classes/rendering_device.hpp>
-#include <godot_cpp/classes/texture2drd.hpp>
+#include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/core/class_db.hpp>
 using namespace godot;
 
 MPVTexture::MPVTexture() {
 	_ensure_placeholder();
-	_update_texture_rid();
+	presentation_texture.instantiate();
+	_update_presentation_texture();
 }
 
-MPVTexture::~MPVTexture() {
-	RenderingServer *rendering_server = RenderingServer::get_singleton();
-	if (rendering_server == nullptr) {
-		return;
-	}
-
-	if (texture_rid.is_valid()) {
-		rendering_server->free_rid(texture_rid);
-		texture_rid = RID();
-	}
-}
+MPVTexture::~MPVTexture() = default;
 
 void MPVTexture::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_placeholder_texture", "texture"), &MPVTexture::set_placeholder_texture);
@@ -57,44 +47,36 @@ void MPVTexture::_ensure_placeholder() {
 	generated_placeholder = ImageTexture::create_from_image(image);
 }
 
-void MPVTexture::_update_texture_rid() {
+void MPVTexture::_update_presentation_texture() {
 	RenderingServer *rendering_server = RenderingServer::get_singleton();
-	if (rendering_server == nullptr) {
+	if (!rendering_server) {
 		return;
+	}
+
+	if (presentation_texture.is_null()) {
+		presentation_texture.instantiate();
 	}
 
 	const Ref<Texture2D> active = _get_active_texture();
-	RID replacement_rid;
-
-	if (active.is_valid()) {
-		if (const Texture2DRD *rd_texture = Object::cast_to<Texture2DRD>(active.ptr())) {
-			const RID rd_rid = rd_texture->get_texture_rd_rid();
-			RenderingDevice *rendering_device = rendering_server->get_rendering_device();
-			if (rd_rid.is_valid() && rendering_device != nullptr && rendering_device->texture_is_valid(rd_rid)) {
-				replacement_rid = rendering_server->texture_rd_create(rd_rid);
-			}
-		}
-
-		if (!replacement_rid.is_valid()) {
-			const Ref<Image> image = active->get_image();
-			if (image.is_valid() && !image->is_empty()) {
-				replacement_rid = rendering_server->texture_2d_create(image);
-			}
-		}
-	}
-
-	if (!replacement_rid.is_valid()) {
-		replacement_rid = rendering_server->texture_2d_placeholder_create();
-	}
-
-	if (texture_rid.is_valid() && replacement_rid.is_valid()) {
-		rendering_server->texture_replace(texture_rid, replacement_rid);
+	if (active.is_null()) {
 		return;
 	}
 
-	if (replacement_rid.is_valid()) {
-		texture_rid = replacement_rid;
+	RID rd_rid;
+	if (const Texture2DRD *rd_texture = Object::cast_to<Texture2DRD>(active.ptr())) {
+		rd_rid = rd_texture->get_texture_rd_rid();
+	} else {
+		const RID active_rid = active->get_rid();
+		if (active_rid.is_valid()) {
+			rd_rid = rendering_server->texture_get_rd_texture(active_rid, false);
+		}
 	}
+
+	if (!rd_rid.is_valid()) {
+		return;
+	}
+
+	presentation_texture->set_texture_rd_rid(rd_rid);
 }
 
 void MPVTexture::set_placeholder_texture(const Ref<Texture2D> &p_texture) {
@@ -102,7 +84,7 @@ void MPVTexture::set_placeholder_texture(const Ref<Texture2D> &p_texture) {
 	if (placeholder_texture.is_null()) {
 		_ensure_placeholder();
 	}
-	_update_texture_rid();
+	_update_presentation_texture();
 	emit_changed();
 }
 
@@ -112,7 +94,7 @@ Ref<Texture2D> MPVTexture::get_placeholder_texture() const {
 
 void MPVTexture::set_live_texture(const Ref<Texture2D> &p_texture) {
 	live_texture = p_texture;
-	_update_texture_rid();
+	_update_presentation_texture();
 	emit_changed();
 }
 
@@ -125,7 +107,6 @@ void MPVTexture::set_playback_active(bool p_active) {
 		return;
 	}
 	playback_active = p_active;
-	_update_texture_rid();
 	emit_changed();
 }
 
@@ -166,10 +147,10 @@ bool MPVTexture::_has_alpha() const {
 }
 
 RID MPVTexture::_get_rid() const {
-	if (!texture_rid.is_valid()) {
-		const_cast<MPVTexture *>(this)->_update_texture_rid();
+	if (presentation_texture.is_null()) {
+		const_cast<MPVTexture *>(this)->_update_presentation_texture();
 	}
-	return texture_rid;
+	return presentation_texture.is_valid() ? presentation_texture->get_rid() : RID();
 }
 
 void MPVTexture::_draw(const RID &p_to_canvas_item, const Vector2 &p_pos, const Color &p_modulate, bool p_transpose) const {
