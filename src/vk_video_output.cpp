@@ -187,6 +187,9 @@ bool VkVideoOutput::_ensure_render_context() {
 	init_params.device = reinterpret_cast<VkDevice>(init_slot->handle.logical_device);
 	init_params.queue_graphics.index = init_slot->handle.queue_family_index;
 	init_params.queue_graphics.count = 1;
+	// Godot 4.7 creates a Vulkan 1.2 instance, even on a newer physical device.
+	// libplacebo must not infer a higher shader/synchronization API from the GPU.
+	init_params.max_api_version = VK_API_VERSION_1_2;
 
 	mpv_render_param params[] = {
 		{ MPV_RENDER_PARAM_API_TYPE, const_cast<char *>(MPV_RENDER_API_TYPE_VULKAN) },
@@ -415,6 +418,12 @@ void VkVideoOutput::update() {
 
 void VkVideoOutput::detach() {
 	render_callback_lifetime.reset();
+	RenderingServer *rendering_server = RenderingServer::get_singleton();
+	// A weak token cancels queued callbacks, but cannot stop a callback that
+	// already entered the owner. Drain the render queue before destroying it.
+	if (rendering_server) {
+		rendering_server->force_sync();
+	}
 	if (render_context && dispatch.free) {
 		dispatch.free(render_context);
 		render_context = nullptr;
@@ -427,6 +436,10 @@ void VkVideoOutput::detach() {
 	}
 
 	texture.unref();
+	RenderThreadService::ExternalTextureHandle pending_texture;
+	if (render_thread_service->poll_external_texture_result(pending_texture) && pending_texture.success) {
+		_release_external_texture(pending_texture);
+	}
 
 	for (TextureSlot &slot : slots) {
 		_release_external_texture(slot.handle);
@@ -436,12 +449,11 @@ void VkVideoOutput::detach() {
 		_release_external_texture(retired.handle);
 	}
 	retired_textures.clear();
-	if (render_thread_service->has_pending_work()) {
-		render_thread_service = nullptr;
-	} else {
-		memdelete(render_thread_service);
-		render_thread_service = nullptr;
+	if (rendering_server) {
+		rendering_server->force_sync();
 	}
+	memdelete(render_thread_service);
+	render_thread_service = nullptr;
 	mpv_core = nullptr;
 	requested_width = 0;
 	requested_height = 0;

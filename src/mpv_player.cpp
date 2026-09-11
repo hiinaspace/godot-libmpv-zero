@@ -557,6 +557,8 @@ bool MPVPlayer::_initialize_runtime() {
 
 void MPVPlayer::_shutdown_runtime() {
 	video_texture.unref();
+	// Retarget presentation views while their backing RD textures are alive.
+	_sync_output_texture();
 	if (video_output_backend) {
 		video_output_backend->detach();
 	}
