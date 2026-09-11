@@ -1,0 +1,38 @@
+--- a/main/main.cpp
++++ b/main/main.cpp
+@@ -5258,6 +5258,11 @@
+ 
+ 	OS::get_singleton()->delete_main_loop();
+ 
++	// Retire audio playback resources while their GDExtension bindings exist.
++	if (audio_server) {
++		audio_server->finish();
++	}
++
+ 	OS::get_singleton()->_cmdline.clear();
+ 	OS::get_singleton()->_user_args.clear();
+ 	OS::get_singleton()->_execpath = "";
+@@ -5325,7 +5330,6 @@
+ #endif // XR_DISABLED
+ 
+ 	if (audio_server) {
+-		audio_server->finish();
+ 		memdelete(audio_server);
+ 	}
+ 
+--- a/servers/audio/audio_server.cpp
++++ b/servers/audio/audio_server.cpp
+@@ -1655,6 +1655,13 @@
+ 		AudioDriverManager::get_driver(i)->finish();
+ 	}
+ 
++	// No mixer callbacks remain. Include active or fading playbacks that had
++	// no opportunity to reach the deferred deletion list before shutdown.
++	for (AudioStreamPlaybackListNode *playback : playback_list) {
++		_delete_stream_playback_list_node(playback);
++	}
++	_cleanup_lists();
++
+ 	for (int i = 0; i < buses.size(); i++) {
+ 		memdelete(buses[i]);
+ 	}

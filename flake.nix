@@ -18,6 +18,7 @@
       godot-interop = pkgs.godot_4.overrideAttrs (old: {
         patches = (old.patches or [ ]) ++ [
           ./patches/godot/0001-enable-libplacebo-device-features.patch
+          ./patches/godot/0002-retire-audio-before-extension-unload.patch
         ];
         sconsFlags = old.sconsFlags ++ [ "use_static_cpp=false" ];
       });
