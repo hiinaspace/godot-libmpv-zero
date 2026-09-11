@@ -51,6 +51,7 @@ nix develop --command bash tools/test_linux.sh
 LIBMPV_ZERO_TEST_CPU_QUOTA=150% nix develop --command bash tools/test_linux.sh
 nix develop --command bash tools/test_linux.sh transport
 nix develop --command bash tools/test_linux.sh consumer_stall
+nix develop --command bash tools/test_linux.sh screen_lighting
 nix develop --command godot --headless --path project --audio-driver Dummy \
   --xr-mode off --script res://tests/steam_audio.gd
 ```
@@ -74,6 +75,10 @@ and delayed playback-object release. `consumer_stall` pauses just the two Steam
 Audio consumers: mpv's clock must stop once its bounded queue fills, then recover.
 The headless Steam Audio test keeps old playback objects across player deletion
 and compares irregular mixer requests against a direct source sample by sample.
+`screen_lighting` pauses playback, changes scene lighting, and checks that the
+screen pixels stay unchanged while the textured area light illuminates the room.
+It disables bloom during that comparison to isolate direct lighting, then
+restores the scene's glow for its final screenshot.
 
 Generate a local fixture with moving video, simultaneous flashes/tones, a
 center-channel-only 5.1 soundtrack, and a separate native ASS subtitle track:
@@ -127,10 +132,39 @@ shutdown leaks under the test scene configuration described below. The timing
 figures are a software probe, not an end-to-end latency measurement. The soak
 used repeated short media, so a full-length movie remains a useful next test.
 
-For that manual session, use the desktop launch command above with a movie path
+For further manual sessions, use the desktop launch command above with a movie path
 or URL. Check dialogue timing, subtitle appearance, seeking, pause/resume and
 behavior at EOF over an uninterrupted viewing session. Follow with headset
 testing before preparing portable Linux and Windows builds for other testers.
+
+### Initial VR viewing and screen lighting follow-up
+
+A user watched a 24-minute episode in VR and reported no stalls or A/V desync,
+with solid video and spatial audio. They did observe intermittent bright pixels
+on or near the screen, amplified by bloom, including while playback was paused.
+This is initial headset evidence, not broad PCVR compatibility validation.
+
+The scene's existing textured `AreaLight3D` now provides the screen's response on
+the room without a reflection probe. Rectangular LTC area lights shipped in
+[Godot 4.7](https://godotengine.org/releases/4.7/); texture support and GPU costs
+are documented in [AreaLight3D](https://docs.godotengine.org/en/4.7/classes/class_arealight3d.html).
+This provides direct diffuse/specular screen lighting, not general reflections
+of the room or bounced global illumination. The light follows video aspect ratio.
+
+The authored screen material was lit even though the script's fallback material
+was unshaded. The screen is now consistently unshaded, so it does not receive
+its coplanar area light. Forward+ ignores emission on unshaded materials, so the
+video uses albedo alone, with the texture's sRGB view handling color conversion.
+The earlier extra forced sRGB conversion is disabled.
+
+Desktop playback and the paused-screen lighting check pass without removing any
+scene nodes for the tests. All 135 sampled screen pixels were unchanged when
+lighting varied; the same check failed with the old material restored. Transport
+regression and native ASS/surround playback also passed after the scene change.
+The reported flashes have not been reproduced in
+desktop diagnostics; their exact cause, including whether NaNs are involved,
+remains unconfirmed. The material correction needs a headset retest of paused
+and moving video before considering that report resolved.
 
 ## Implementation and remaining gates
 
@@ -152,14 +186,14 @@ Additional GPU/driver and Windows coverage must check queue ownership as well.
 Playback properties arrive through mpv observations instead of synchronous reads
 on the rendering thread. Render updates continue through load and seek transitions.
 
-The tests omit the scene's ReflectionProbe: Godot 4.7.2 also leaks seven RD
-textures when this probe is tested without MPVPlayer. The unmodified demo still
-contains the probe. The separate intermittent audio-object shutdown leak is
-addressed by the engine's early audio retirement patch.
+The original baseline tests omitted the scene's ReflectionProbe because Godot
+4.7.2 leaked seven RD textures even without MPVPlayer. The scene now omits that
+probe too, and the tests run the same scene. The separate intermittent audio-object
+shutdown leak is addressed by the engine's early audio retirement patch.
 
 Desktop playback, native ASS subtitles, surround downmix and a YouTube URL through
-mpv's yt-dlp hook have been exercised. Physical A/V sync, a full movie watched by
-a person, headset behavior, other GPUs, HDR/color correctness, Windows and
+mpv's yt-dlp hook have been exercised. A full-length movie, instrumented physical
+A/V sync, the remaining headset visual issue, other GPUs, HDR/color correctness, Windows and
 distributable exports remain separate validation gates. The next API design stage
 is the multiplayer theater integration after singleplayer testing.
 

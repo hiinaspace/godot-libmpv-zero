@@ -4,8 +4,10 @@ See the [September 2026 dependency reassessment and Linux/Windows theater plan](
 for current direction. [Linux development instructions](LINUX.md) cover the
 patched Godot build, pinned dependencies, and automated Steam Audio playback
 checks. Linux desktop playback, a ten-minute soak and scoped stress checks pass;
-PCVR validation and release packaging remain in progress. The Windows instructions
-below describe the earlier prototype and need revalidation against the current patches.
+An initial 24-minute VR viewing was reported smooth; a screen-lighting visual
+issue is under retest. Broader PCVR validation and release packaging remain in
+progress. The Windows instructions below describe the earlier prototype and need
+revalidation against the current patches.
 
 Experimental Godot 4 GDExtension for `libmpv`-backed video playback with:
 
@@ -132,7 +134,7 @@ Earlier Windows prototype milestones (not revalidated with the current patches):
 Known rough edges:
 
 - Current Linux/Windows portable release bundles are not validated yet
-- Physical A/V sync and headset playback still need manual validation; see [Linux notes](LINUX.md)
+- Initial VR playback was reported smooth, but the screen-flash correction needs a headset retest; see [Linux notes](LINUX.md)
 - startup / first-frame bring-up is still noticeable
 
 Use the pinned Linux development environment for current local testing. PCVR
