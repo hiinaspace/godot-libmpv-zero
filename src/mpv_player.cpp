@@ -43,7 +43,7 @@ void trace_load_log(const String &p_message) {
 
 MPVPlayer::MPVPlayer() :
 		mpv_core(std::make_unique<libmpv_zero::MpvCore>()),
-		audio_bridge(std::make_unique<libmpv_zero::AudioBridge>()) {
+		audio_bridge(std::make_shared<libmpv_zero::AudioBridge>()) {
 	_recreate_video_output_backend();
 }
 

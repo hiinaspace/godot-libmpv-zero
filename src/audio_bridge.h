@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <deque>
 #include <mutex>
+#include <memory>
 #include <vector>
 
 #include <godot_cpp/classes/audio_frame.hpp>
@@ -13,7 +14,7 @@
 
 namespace libmpv_zero {
 
-class AudioBridge {
+class AudioBridge : public std::enable_shared_from_this<AudioBridge> {
 public:
 	struct Diagnostics {
 		int sample_rate = 48000;
@@ -38,6 +39,7 @@ public:
 	int pull_channel_frames(int p_channel_index, godot::AudioFrame *p_buffer, int p_frame_count);
 	bool consume_configuration_changed();
 	int get_audio_channel_count() const;
+	int get_sample_rate() const;
 	godot::Ref<godot::AudioStream> get_audio_stream_for_channel(int p_channel_index) const;
 	Diagnostics get_diagnostics() const;
 

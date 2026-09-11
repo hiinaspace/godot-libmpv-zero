@@ -69,7 +69,7 @@ void AudioBridge::reconfigure_locked(int p_channel_count, int p_sample_rate) {
 	for (int i = 0; i < p_channel_count; ++i) {
 		ChannelState channel;
 		channel.stream.instantiate();
-		channel.stream->configure(this, i);
+		channel.stream->configure(weak_from_this(), i);
 		channels.push_back(channel);
 	}
 
@@ -199,6 +199,11 @@ bool AudioBridge::consume_configuration_changed() {
 	const bool changed = configuration_changed;
 	configuration_changed = false;
 	return changed;
+}
+
+int AudioBridge::get_sample_rate() const {
+	std::lock_guard<std::mutex> lock(mutex);
+	return sample_rate;
 }
 
 int AudioBridge::get_audio_channel_count() const {

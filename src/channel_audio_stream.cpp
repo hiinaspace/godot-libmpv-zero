@@ -11,11 +11,11 @@ void ChannelAudioStream::_bind_methods() {}
 Ref<AudioStreamPlayback> ChannelAudioStream::_instantiate_playback() const {
 	Ref<ChannelAudioStreamPlayback> playback;
 	playback.instantiate();
-	playback->configure(bridge, channel_index);
+	playback->configure(bridge.lock(), channel_index);
 	return playback;
 }
 
-void ChannelAudioStream::configure(libmpv_zero::AudioBridge *p_bridge, int p_channel_index) {
+void ChannelAudioStream::configure(const std::weak_ptr<libmpv_zero::AudioBridge> &p_bridge, int p_channel_index) {
 	bridge = p_bridge;
 	channel_index = p_channel_index;
 }
@@ -38,7 +38,7 @@ bool ChannelAudioStream::_is_monophonic() const {
 
 void ChannelAudioStreamPlayback::_bind_methods() {}
 
-void ChannelAudioStreamPlayback::configure(libmpv_zero::AudioBridge *p_bridge, int p_channel_index) {
+void ChannelAudioStreamPlayback::configure(const std::shared_ptr<libmpv_zero::AudioBridge> &p_bridge, int p_channel_index) {
 	bridge = p_bridge;
 	channel_index = p_channel_index;
 }
@@ -66,7 +66,7 @@ float ChannelAudioStreamPlayback::_get_stream_sampling_rate() const {
 		return 48000.0f;
 	}
 
-	return static_cast<float>(bridge->get_diagnostics().sample_rate);
+	return static_cast<float>(bridge->get_sample_rate());
 }
 
 void ChannelAudioStreamPlayback::_start(double /*p_from_pos*/) {

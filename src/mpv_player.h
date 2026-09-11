@@ -41,7 +41,7 @@ private:
 	void _recreate_video_output_backend();
 
 	std::unique_ptr<libmpv_zero::MpvCore> mpv_core;
-	std::unique_ptr<libmpv_zero::AudioBridge> audio_bridge;
+	std::shared_ptr<libmpv_zero::AudioBridge> audio_bridge;
 	std::unique_ptr<libmpv_zero::VideoOutputBackend> video_output_backend;
 	Ref<Texture2D> video_texture;
 	Ref<MPVTexture> output_texture;
