@@ -62,6 +62,16 @@ func _ready() -> void:
 	_ensure_controllers()
 	_configure_screen_material()
 	_configure_player()
+	if _flat_mode:
+		var controls := preload("res://desktop_controls.gd").new()
+		controls.player = _player
+		controls.open_media = _open_media
+		add_child(controls)
+
+
+func _open_media(source: String) -> void:
+	_media_source = _normalize_media_source(source)
+	_reload_media()
 
 
 func _process(delta: float) -> void:
