@@ -10,10 +10,21 @@
 #include <godot_cpp/core/memory.hpp>
 #include <godot_cpp/variant/callable_method_pointer.hpp>
 #include <memory>
+#include <cstdio>
+#include <cstdlib>
 
 using namespace godot;
 
 namespace libmpv_zero {
+namespace {
+void trace_render(const char *message) {
+	const char *trace = std::getenv("LIBMPV_ZERO_TRACE_LOAD");
+	if (trace && trace[0] == '1') {
+		std::fprintf(stderr, "[render-trace] %s\n", message);
+		std::fflush(stderr);
+	}
+}
+} // namespace
 
 void VkVideoOutput::_on_render_update(void *p_context) {
 	VkVideoOutput *self = static_cast<VkVideoOutput *>(p_context);
@@ -190,7 +201,9 @@ bool VkVideoOutput::_ensure_render_context() {
 	// These two setup/teardown callbacks are synchronous; their owner remains
 	// alive until force_sync() returns. Frame callbacks use the weak token.
 	server->call_on_render_thread(callable_mp_static(&VkVideoOutput::_create_render_context_on_render_thread_static).bind(reinterpret_cast<uint64_t>(this)));
+	trace_render("waiting for render context setup");
 	server->force_sync();
+	trace_render("render context setup synchronized");
 	if (!render_context && probe_failed_callback.is_valid()) {
 		probe_failed_callback.call(status);
 	}
@@ -261,14 +274,18 @@ bool VkVideoOutput::_create_render_context() {
 		{ MPV_RENDER_PARAM_INVALID, nullptr },
 	};
 
+	trace_render("creating mpv render context");
 	const int create_result = dispatch.create(&render_context, static_cast<mpv_handle *>(mpv_core->get_native_handle()), params);
+	trace_render("mpv render context create returned");
 	if (create_result < 0 || !render_context) {
 		status = vformat("mpv Vulkan render context create failed (%d)", create_result);
 		render_context = nullptr;
 		return false;
 	}
 
+	trace_render("setting update callback");
 	dispatch.set_update_callback(render_context, &VkVideoOutput::_on_render_update, this);
+	trace_render("update callback installed");
 	status = "vulkan render context ready";
 	render_context_logged = true;
 	return true;

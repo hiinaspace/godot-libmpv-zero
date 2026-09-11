@@ -188,8 +188,8 @@ bool MpvCore::initialize() {
 		return false;
 	}
 
-	dispatch.set_option_string(handle, "terminal", "no");
-	dispatch.set_option_string(handle, "msg-level", "all=warn");
+	dispatch.set_option_string(handle, "terminal", is_load_trace_enabled() ? "yes" : "no");
+	dispatch.set_option_string(handle, "msg-level", is_load_trace_enabled() ? "all=v" : "all=warn");
 	dispatch.set_option_string(handle, "idle", "yes");
 	dispatch.set_option_string(handle, "keep-open", "yes");
 	const char *video_output_name = video_output_mode == VideoOutputMode::LIBMPV ? "libmpv" : "null";
