@@ -45,7 +45,7 @@
           cmake ninja pkg-config python3 scons patchelf binutils gdb
           vulkan-headers vulkan-loader vulkan-tools vulkan-validation-layers
           ffmpeg yt-dlp deno libpulseaudio
-        ] ++ [ godot ];
+        ] ++ [ godot-interop ];
         buildInputs = [ mpv pkgs.stdenv.cc.cc.lib ];
         MPV_DIR = "${mpv.dev}";
         LIBMPV_ZERO_MPV_LIBRARY = "${mpv}/lib/libmpv.so.2";

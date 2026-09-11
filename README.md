@@ -1,8 +1,11 @@
 # godot-libmpv-zero
 
 See the [September 2026 dependency reassessment and Linux/Windows theater plan](REASSESSMENT-2026-09.md)
-for current direction. The build instructions and validation history below
-describe the existing Windows prototype; the Linux port is planned, not complete.
+for current direction. [Linux development instructions](LINUX.md) cover the
+patched Godot build, pinned dependencies, and automated Steam Audio playback
+check. Linux desktop playback now runs; sustained synchronization and release
+packaging remain in progress. The Windows instructions below describe the
+earlier prototype and need revalidation against the current patches.
 
 Experimental Godot 4 GDExtension for `libmpv`-backed video playback with:
 
@@ -22,7 +25,7 @@ Experimental Godot 4 GDExtension for `libmpv`-backed video playback with:
 - [PLAN.md](PLAN.md): project plan and implementation notes
 - [CHARTER.md](CHARTER.md): project goals and constraints
 
-## Local build
+## Windows local build
 
 Requirements:
 
@@ -112,7 +115,7 @@ Supported targets in the current prototype:
 
 ## Status
 
-Current prototype milestones already validated locally:
+Earlier Windows prototype milestones (not revalidated with the current patches):
 
 - stable Vulkan video playback in Godot scenes
 - `MPVTexture` resource workflow in authored materials
@@ -123,8 +126,8 @@ Current prototype milestones already validated locally:
 
 Known rough edges:
 
-- Windows x86_64 is the only release-ready target today
-- wrapped texture RID cleanup still leaks on exit instead of risking reload-time crashes
+- Current Linux/Windows portable release bundles are not validated yet
+- Linux playback and teardown checks are in progress; see [Linux notes](LINUX.md)
 - startup / first-frame bring-up is still noticeable
 
 This is still prototype software, but the core playback path is now usable enough for external testing and prerelease builds.

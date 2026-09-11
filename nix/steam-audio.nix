@@ -44,5 +44,6 @@ in pkgs.stdenv.mkDerivation {
     cp libgodot-steam-audio.linux.template_debug.x86_64.so "$out/bin/"
     cp ${sdk}/lib/linux-x64/libphonon.so "$out/bin/"
     cp ../project/addons/godot-steam-audio/bin/libgodot-steam-audio.gdextension "$out/bin/"
+    cp -r ../project/addons/godot-steam-audio/icons "$out/icons"
   '';
 }

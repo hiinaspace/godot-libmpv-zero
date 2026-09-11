@@ -1,8 +1,9 @@
 # September 2026 reassessment and theater plan
 
 Evaluated 2026-09-10. This is the current planning entry point; `PLAN.md` and
-`CHARTER.md` retain the history of the Windows prototype. This document proposes
-work; it does not claim that the Linux port or a current Windows build has run.
+`CHARTER.md` retain the history of the Windows prototype. The assessment below
+records the starting state; [Linux development notes](LINUX.md) track the later
+bring-up and its remaining validation gaps.
 
 ## Recommendation
 
@@ -51,6 +52,9 @@ was performed in this assessment.
 
 ### User decisions after review (2026-09-10)
 
+- Use a small custom Godot build for the initial prototype to enable the Vulkan
+  features required by libplacebo. Revisit stock-engine support after playback
+  is reliable.
 - Steam Audio/HRTF is required from the initial Linux demo. Ordinary Godot
   spatialization is only a diagnostic control. Patching the Steam Audio addon
   is an accepted maintenance cost.
