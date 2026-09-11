@@ -37,6 +37,10 @@ public:
 	void pause();
 	void stop();
 	void seek(double p_seconds);
+	bool set_speed(double p_speed);
+	double get_speed() const { return speed; }
+	bool is_buffering() const { return buffering; }
+	bool is_eof() const { return eof_reached; }
 	void set_video_output_mode(VideoOutputMode p_mode);
 	void set_audio_sink(void *p_user_data, const mpv_godot_audio_sink *p_sink);
 	bool initialize();
@@ -64,6 +68,8 @@ private:
 	godot::String loaded_path;
 	double time_pos = 0.0;
 	double duration = 0.0;
+	double speed = 1.0;
+	bool buffering = false;
 	godot::String status = "mpv not initialized";
 	PlaybackState playback_state = PlaybackState::STOPPED;
 	bool file_loaded = false;

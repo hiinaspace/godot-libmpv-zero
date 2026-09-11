@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 
 #include <godot_cpp/classes/os.hpp>
 #include <godot_cpp/classes/project_settings.hpp>
@@ -19,11 +20,12 @@ namespace {
 
 using Clock = std::chrono::steady_clock;
 
-enum ObservedProperty : uint64_t { TIME_POS = 1, DURATION, WIDTH, HEIGHT, PAUSED, EOF_REACHED };
+enum ObservedProperty : uint64_t { TIME_POS = 1, DURATION, WIDTH, HEIGHT, PAUSED, EOF_REACHED, BUFFERING, SPEED };
 struct PropertyObservation { ObservedProperty id; const char *name; mpv_format format; };
 constexpr PropertyObservation observed_properties[] = {
 	{TIME_POS, "time-pos", MPV_FORMAT_DOUBLE}, {DURATION, "duration", MPV_FORMAT_DOUBLE},
 	{WIDTH, "width", MPV_FORMAT_INT64}, {HEIGHT, "height", MPV_FORMAT_INT64},
+	{BUFFERING, "paused-for-cache", MPV_FORMAT_FLAG}, {SPEED, "speed", MPV_FORMAT_DOUBLE},
 	{PAUSED, "pause", MPV_FORMAT_FLAG}, {EOF_REACHED, "eof-reached", MPV_FORMAT_FLAG},
 };
 
@@ -353,7 +355,13 @@ void MpvCore::stop() {
 	status = "stop issued";
 }
 
+bool MpvCore::set_speed(double p_speed) {
+	if (!initialized || !std::isfinite(p_speed) || p_speed < 0.5 || p_speed > 2.0) return false;
+	return get_dispatch().set_property_async(handle, 0, "speed", MPV_FORMAT_DOUBLE, &p_speed) >= 0;
+}
+
 void MpvCore::seek(double p_seconds) {
+	if (!std::isfinite(p_seconds)) return;
 	if (!initialized) {
 		status = "seek ignored because libmpv is not initialized";
 		return;
@@ -363,7 +371,7 @@ void MpvCore::seek(double p_seconds) {
 	seeking = true;
 	const String seconds_string = String::num(time_pos);
 	const CharString seconds_utf8 = seconds_string.utf8();
-	const char *command[] = { "seek", seconds_utf8.get_data(), "absolute", nullptr };
+	const char *command[] = { "seek", seconds_utf8.get_data(), "absolute+exact", nullptr };
 	const int result = get_dispatch().command_async(handle, 0, command);
 	if (result < 0) {
 		status = "seek failed: " + format_mpv_error(result);
@@ -417,6 +425,12 @@ MpvCore::PollResult MpvCore::poll() {
 							result.video_reconfigured |= size != value;
 							size = value;
 						}
+						break;
+					case BUFFERING:
+						if (property->format == MPV_FORMAT_FLAG) buffering = *static_cast<int *>(property->data) != 0;
+						break;
+					case SPEED:
+						if (property->format == MPV_FORMAT_DOUBLE) speed = *static_cast<double *>(property->data);
 						break;
 					case PAUSED:
 						if (property->format == MPV_FORMAT_FLAG) observed_paused = *static_cast<int *>(property->data) != 0;

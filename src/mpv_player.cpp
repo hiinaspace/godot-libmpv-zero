@@ -52,6 +52,8 @@ MPVPlayer::MPVPlayer() :
 MPVPlayer::~MPVPlayer() = default;
 
 void MPVPlayer::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("set_playback_speed", "speed"), &MPVPlayer::set_playback_speed);
+	ClassDB::bind_method(D_METHOD("get_playback_state"), &MPVPlayer::get_playback_state);
 	ClassDB::bind_method(D_METHOD("set_source", "source"), &MPVPlayer::set_source);
 	ClassDB::bind_method(D_METHOD("get_source"), &MPVPlayer::get_source);
 	ClassDB::bind_method(D_METHOD("set_autoplay", "enabled"), &MPVPlayer::set_autoplay);
@@ -248,6 +250,25 @@ void MPVPlayer::stop() {
 	video_texture.unref();
 	_sync_output_texture();
 	_sync_audio_targets();
+}
+
+bool MPVPlayer::set_playback_speed(double p_speed) {
+	return mpv_core && mpv_core->set_speed(p_speed);
+}
+
+Dictionary MPVPlayer::get_playback_state() const {
+	Dictionary state;
+	state["position"] = get_playback_position();
+	state["duration"] = get_duration();
+	state["paused"] = is_paused();
+	state["playing"] = is_playing();
+	state["loading"] = !mpv_core || mpv_core->is_loading();
+	state["seeking"] = mpv_core && mpv_core->is_seeking();
+	state["buffering"] = mpv_core && mpv_core->is_buffering();
+	state["loaded"] = mpv_core && mpv_core->has_loaded_file();
+	state["eof"] = mpv_core && mpv_core->is_eof();
+	state["speed"] = mpv_core ? mpv_core->get_speed() : 1.0;
+	return state;
 }
 
 void MPVPlayer::seek(double p_seconds) {

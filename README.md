@@ -139,3 +139,18 @@ Known rough edges:
 
 Use the pinned Linux development environment for current local testing. PCVR
 validation and portable builds for external testers remain separate steps.
+
+### Playback synchronization API
+
+`MPVPlayer.get_playback_state()` returns a nonblocking snapshot of cached mpv
+observations: `position`, `duration`, `paused`, `playing`, `loading`, `seeking`,
+`buffering`, `loaded`, `eof`, and `speed`. Observations update during `_process`;
+this is not a synchronous query or an independent wall-clock timestamp.
+
+`set_playback_speed(speed)` queues a speed request and returns whether mpv
+accepted it for processing. Finite values from 0.5 through 2.0 are supported;
+read the observed `speed` to confirm application. Small temporary adjustments
+allow applications to correct inter-client drift while retaining mpv's normal
+audio tempo processing. `seek(seconds)` rejects nonfinite inputs and requests
+an exact absolute seek. Applications should wait for `seeking` to clear before
+issuing another correction.

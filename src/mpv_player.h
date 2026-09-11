@@ -85,6 +85,8 @@ public:
 	void pause();
 	void stop();
 	void seek(double p_seconds);
+	bool set_playback_speed(double p_speed);
+	Dictionary get_playback_state() const;
 	double get_playback_position() const;
 	double get_time_pos() const;
 	double get_duration() const;
