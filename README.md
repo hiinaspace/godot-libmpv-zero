@@ -1,5 +1,9 @@
 # godot-libmpv-zero
 
+See the [September 2026 dependency reassessment and Linux/Windows theater plan](REASSESSMENT-2026-09.md)
+for current direction. The build instructions and validation history below
+describe the existing Windows prototype; the Linux port is planned, not complete.
+
 Experimental Godot 4 GDExtension for `libmpv`-backed video playback with:
 
 - Vulkan external-image video rendering
@@ -12,11 +16,11 @@ Experimental Godot 4 GDExtension for `libmpv`-backed video playback with:
 
 ## Repository layout
 
-- [src/](/S:/code/godot-libmpv-zero/src): GDExtension source
-- [project/](/S:/code/godot-libmpv-zero/project): sample Godot project used for local validation
-- [project/bin/libmpv_zero.gdextension](/S:/code/godot-libmpv-zero/project/bin/libmpv_zero.gdextension): extension descriptor
-- [PLAN.md](/S:/code/godot-libmpv-zero/PLAN.md): project plan and implementation notes
-- [CHARTER.md](/S:/code/godot-libmpv-zero/CHARTER.md): project goals and constraints
+- [src/](src): GDExtension source
+- [project/](project): sample Godot project used for local validation
+- [project/bin/libmpv_zero.gdextension](project/bin/libmpv_zero.gdextension): extension descriptor
+- [PLAN.md](PLAN.md): project plan and implementation notes
+- [CHARTER.md](CHARTER.md): project goals and constraints
 
 ## Local build
 
@@ -48,7 +52,7 @@ Build the extension:
 & "C:\Program Files\CMake\bin\cmake.exe" --build build-phase0 --config Debug
 ```
 
-The built DLL and staged runtime land under [project/bin/windows](/S:/code/godot-libmpv-zero/project/bin/windows).
+The built DLL and staged runtime land under [project/bin/windows](project/bin/windows).
 
 ## Sample run
 
@@ -101,7 +105,7 @@ Supported targets in the current prototype:
 
 ## GitHub Actions
 
-- [windows-addon.yml](/S:/code/godot-libmpv-zero/.github/workflows/windows-addon.yml) builds the Windows addon against staged `mpv` artifacts from the forked `mpv-winbuild-cmake` workflow.
+- [windows-addon.yml](.github/workflows/windows-addon.yml) builds the Windows addon against staged `mpv` artifacts from the forked `mpv-winbuild-cmake` workflow.
 - The workflow artifact is intended to be a reusable addon bundle, not just the raw sample project output.
 - Pushing a tag matching `v*` publishes a prerelease automatically.
 - You can also dispatch the workflow manually and pass `release_tag` to publish an ad hoc prerelease from the Actions UI.

@@ -1,5 +1,10 @@
 # godot-libmpv-zero Implementation Plan
 
+> Current planning entry point: [September 2026 reassessment and theater plan](REASSESSMENT-2026-09.md).
+> It supersedes the Windows-first priorities and historical architecture notes below.
+> The April 19 code uses Godot-owned RD textures; consult the reassessment before
+> implementing the older external-image or audio-migration proposals.
+
 ## Context
 
 This project creates a Godot 4 GDExtension for libmpv-backed video playback targeting VR use cases. The existing prototypes in this workspace (`godot_mpv` and `gdmpv`) confirm the same architectural problem: both move video frames through CPU memory, which is the wrong baseline for VR.

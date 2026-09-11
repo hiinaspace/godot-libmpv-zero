@@ -70,3 +70,8 @@ bin/windows/*
 
 .claude
 project/addons/
+
+# Machine-specific notes and diagnostic captures
+.local/
+result
+result-*
