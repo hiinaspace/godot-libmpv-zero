@@ -2,6 +2,11 @@
 set -euo pipefail
 repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$repo_dir"
+test_name=${1:-playback_smoke}
+case "$test_name" in
+  playback_smoke|transport) ;;
+  *) echo "Unknown test: $test_name" >&2; exit 2 ;;
+esac
 output_dir=${LIBMPV_ZERO_TEST_OUTPUT:-$repo_dir/.local/linux-smoke/$(date +%Y%m%d-%H%M%S)}
 mkdir -p "$output_dir"
 output_dir=$(cd "$output_dir" && pwd)
@@ -18,7 +23,7 @@ cleanup() {
 trap cleanup EXIT
 parec --device="$sink_name.monitor" --raw --rate=48000 --channels=2 --format=float32le > "$output_dir/audio.f32" &
 capture_pid=$!
-runner=(timeout --kill-after=5s 45s)
+runner=(timeout --kill-after=5s 90s)
 if [[ -n "${LIBMPV_ZERO_TEST_CPU_QUOTA:-}" ]]; then
   # Only the game process and its children enter this scope.
   runner=(systemd-run --user --scope --quiet -p "CPUQuota=$LIBMPV_ZERO_TEST_CPU_QUOTA" "${runner[@]}")
@@ -30,7 +35,7 @@ export VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation
 export VK_LAYER_VALIDATE_SYNC=1
 status=0
 "${runner[@]}" "${LIBMPV_ZERO_GODOT:-godot}" --path project --rendering-driver vulkan --display-driver x11 \
-  --resolution 960x640 --verbose --xr-mode off --script res://tests/playback_smoke.gd -- --flat > "$output_dir/godot.log" 2>&1 || status=$?
+  --resolution 960x640 --verbose --xr-mode off --script "res://tests/$test_name.gd" -- --flat > "$output_dir/godot.log" 2>&1 || status=$?
 kill "$capture_pid" 2>/dev/null || true
 wait "$capture_pid" 2>/dev/null || true
 capture_pid=
