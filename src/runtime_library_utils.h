@@ -4,6 +4,9 @@
 
 namespace libmpv_zero {
 
-bool resolve_windows_runtime_library_path(const godot::String &p_library_name, godot::String &r_path, godot::String &r_error);
+void *open_mpv_runtime(godot::String &r_path, godot::String &r_error);
+void *open_vulkan_runtime(godot::String &r_error);
+void *runtime_symbol(void *p_library, const char *p_name);
+void close_runtime(void *p_library);
 
 } // namespace libmpv_zero

@@ -10,9 +10,6 @@
 #include <godot_cpp/core/memory.hpp>
 #include <godot_cpp/variant/callable_method_pointer.hpp>
 #include <memory>
-#ifdef _WIN32
-#include <windows.h>
-#endif
 
 using namespace godot;
 
@@ -84,36 +81,28 @@ void VkVideoOutput::_render_frame_on_render_thread() {
 }
 
 bool VkVideoOutput::_load_render_dispatch() {
-#ifdef _WIN32
 	if (dispatch.library && dispatch.vulkan_library) {
 		return true;
 	}
 
-	String dll_path;
+	String path;
 	String error;
-	if (resolve_windows_runtime_library_path("libmpv-2.dll", dll_path, error)) {
-		String dll_dir = dll_path.get_base_dir();
-		const Char16String dll_dir_utf16 = dll_dir.utf16();
-		const Char16String dll_path_utf16 = dll_path.utf16();
-		SetDllDirectoryW(reinterpret_cast<LPCWSTR>(dll_dir_utf16.get_data()));
-		dispatch.library = LoadLibraryW(reinterpret_cast<LPCWSTR>(dll_path_utf16.get_data()));
+	dispatch.library = open_mpv_runtime(path, error);
+	if (dispatch.library) {
+		dispatch.vulkan_library = open_vulkan_runtime(error);
 	}
-	if (!dispatch.library) {
-		dispatch.library = LoadLibraryW(L"libmpv-2.dll");
-	}
-	dispatch.vulkan_library = LoadLibraryW(L"vulkan-1.dll");
 	if (!dispatch.library || !dispatch.vulkan_library) {
-		status = "failed to load Vulkan libmpv runtime";
+		status = error;
 		_unload_render_dispatch();
 		return false;
 	}
 
-	dispatch.create = reinterpret_cast<PFN_mpv_render_context_create>(GetProcAddress(static_cast<HMODULE>(dispatch.library), "mpv_render_context_create"));
-	dispatch.set_update_callback = reinterpret_cast<PFN_mpv_render_context_set_update_callback>(GetProcAddress(static_cast<HMODULE>(dispatch.library), "mpv_render_context_set_update_callback"));
-	dispatch.update = reinterpret_cast<PFN_mpv_render_context_update>(GetProcAddress(static_cast<HMODULE>(dispatch.library), "mpv_render_context_update"));
-	dispatch.render = reinterpret_cast<PFN_mpv_render_context_render>(GetProcAddress(static_cast<HMODULE>(dispatch.library), "mpv_render_context_render"));
-	dispatch.free = reinterpret_cast<PFN_mpv_render_context_free>(GetProcAddress(static_cast<HMODULE>(dispatch.library), "mpv_render_context_free"));
-	dispatch.get_instance_proc_addr = reinterpret_cast<PFN_vkGetInstanceProcAddr>(GetProcAddress(static_cast<HMODULE>(dispatch.vulkan_library), "vkGetInstanceProcAddr"));
+	dispatch.create = reinterpret_cast<PFN_mpv_render_context_create>(runtime_symbol(dispatch.library, "mpv_render_context_create"));
+	dispatch.set_update_callback = reinterpret_cast<PFN_mpv_render_context_set_update_callback>(runtime_symbol(dispatch.library, "mpv_render_context_set_update_callback"));
+	dispatch.update = reinterpret_cast<PFN_mpv_render_context_update>(runtime_symbol(dispatch.library, "mpv_render_context_update"));
+	dispatch.render = reinterpret_cast<PFN_mpv_render_context_render>(runtime_symbol(dispatch.library, "mpv_render_context_render"));
+	dispatch.free = reinterpret_cast<PFN_mpv_render_context_free>(runtime_symbol(dispatch.library, "mpv_render_context_free"));
+	dispatch.get_instance_proc_addr = reinterpret_cast<PFN_vkGetInstanceProcAddr>(runtime_symbol(dispatch.vulkan_library, "vkGetInstanceProcAddr"));
 
 	if (!dispatch.create || !dispatch.set_update_callback || !dispatch.update || !dispatch.render || !dispatch.free || !dispatch.get_instance_proc_addr) {
 		status = "failed to resolve Vulkan libmpv symbols";
@@ -122,21 +111,11 @@ bool VkVideoOutput::_load_render_dispatch() {
 	}
 
 	return true;
-#else
-	status = "vulkan video backend currently only supports Windows";
-	return false;
-#endif
 }
 
 void VkVideoOutput::_unload_render_dispatch() {
-#ifdef _WIN32
-	if (dispatch.library) {
-		FreeLibrary(static_cast<HMODULE>(dispatch.library));
-	}
-	if (dispatch.vulkan_library) {
-		FreeLibrary(static_cast<HMODULE>(dispatch.vulkan_library));
-	}
-#endif
+	close_runtime(dispatch.library);
+	close_runtime(dispatch.vulkan_library);
 	dispatch = RenderDispatch();
 }
 

@@ -10,9 +10,6 @@
 #include <godot_cpp/variant/char_string.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
-#ifdef _WIN32
-#include <windows.h>
-#endif
 
 using namespace godot;
 
@@ -23,9 +20,7 @@ namespace {
 using Clock = std::chrono::steady_clock;
 
 struct MpvDispatch {
-#ifdef _WIN32
-	HMODULE library = nullptr;
-#endif
+	void *library = nullptr;
 	PFN_mpv_create create = nullptr;
 	PFN_mpv_initialize initialize = nullptr;
 	PFN_mpv_terminate_destroy terminate_destroy = nullptr;
@@ -130,45 +125,32 @@ void trace_load_log(const String &p_message) {
 }
 
 bool load_mpv_dispatch(String &r_error) {
-#ifdef _WIN32
 	MpvDispatch &dispatch = get_dispatch();
 	if (dispatch.library) {
 		return true;
 	}
 
-	String dll_path;
-	if (resolve_windows_runtime_library_path("libmpv-2.dll", dll_path, r_error)) {
-		String dll_dir = dll_path.get_base_dir();
-		const Char16String dll_dir_utf16 = dll_dir.utf16();
-		const Char16String dll_path_utf16 = dll_path.utf16();
-		SetDllDirectoryW(reinterpret_cast<LPCWSTR>(dll_dir_utf16.get_data()));
-		dispatch.library = LoadLibraryW(reinterpret_cast<LPCWSTR>(dll_path_utf16.get_data()));
-	}
-	String loaded_from = dll_path.is_empty() ? String("PATH/libmpv-2.dll") : dll_path;
+	String loaded_from;
+	dispatch.library = open_mpv_runtime(loaded_from, r_error);
 	if (!dispatch.library) {
-		dispatch.library = LoadLibraryW(L"libmpv-2.dll");
-		loaded_from = "PATH/libmpv-2.dll";
-	}
-	if (!dispatch.library) {
-		const DWORD error_code = GetLastError();
-		r_error = vformat("failed to load libmpv-2.dll (Win32 error %d)", static_cast<int>(error_code));
 		return false;
 	}
+	UtilityFunctions::print("libmpv runtime: " + loaded_from);
 
-	dispatch.create = reinterpret_cast<PFN_mpv_create>(GetProcAddress(dispatch.library, "mpv_create"));
-	dispatch.initialize = reinterpret_cast<PFN_mpv_initialize>(GetProcAddress(dispatch.library, "mpv_initialize"));
-	dispatch.terminate_destroy = reinterpret_cast<PFN_mpv_terminate_destroy>(GetProcAddress(dispatch.library, "mpv_terminate_destroy"));
-	dispatch.error_string = reinterpret_cast<PFN_mpv_error_string>(GetProcAddress(dispatch.library, "mpv_error_string"));
-	dispatch.set_option_string = reinterpret_cast<PFN_mpv_set_option_string>(GetProcAddress(dispatch.library, "mpv_set_option_string"));
-	dispatch.command = reinterpret_cast<PFN_mpv_command>(GetProcAddress(dispatch.library, "mpv_command"));
-	dispatch.command_async = reinterpret_cast<PFN_mpv_command_async>(GetProcAddress(dispatch.library, "mpv_command_async"));
-	dispatch.set_property_string = reinterpret_cast<PFN_mpv_set_property_string>(GetProcAddress(dispatch.library, "mpv_set_property_string"));
-	dispatch.set_property_async = reinterpret_cast<PFN_mpv_set_property_async>(GetProcAddress(dispatch.library, "mpv_set_property_async"));
-	dispatch.get_property = reinterpret_cast<PFN_mpv_get_property>(GetProcAddress(dispatch.library, "mpv_get_property"));
-	dispatch.get_property_string = reinterpret_cast<PFN_mpv_get_property_string>(GetProcAddress(dispatch.library, "mpv_get_property_string"));
-	dispatch.free_fn = reinterpret_cast<PFN_mpv_free>(GetProcAddress(dispatch.library, "mpv_free"));
-	dispatch.wait_event = reinterpret_cast<PFN_mpv_wait_event>(GetProcAddress(dispatch.library, "mpv_wait_event"));
-	dispatch.set_godot_audio_callback = reinterpret_cast<PFN_mpv_godot_audio_set_callback>(GetProcAddress(dispatch.library, "mpv_godot_audio_set_callback"));
+	dispatch.create = reinterpret_cast<PFN_mpv_create>(runtime_symbol(dispatch.library, "mpv_create"));
+	dispatch.initialize = reinterpret_cast<PFN_mpv_initialize>(runtime_symbol(dispatch.library, "mpv_initialize"));
+	dispatch.terminate_destroy = reinterpret_cast<PFN_mpv_terminate_destroy>(runtime_symbol(dispatch.library, "mpv_terminate_destroy"));
+	dispatch.error_string = reinterpret_cast<PFN_mpv_error_string>(runtime_symbol(dispatch.library, "mpv_error_string"));
+	dispatch.set_option_string = reinterpret_cast<PFN_mpv_set_option_string>(runtime_symbol(dispatch.library, "mpv_set_option_string"));
+	dispatch.command = reinterpret_cast<PFN_mpv_command>(runtime_symbol(dispatch.library, "mpv_command"));
+	dispatch.command_async = reinterpret_cast<PFN_mpv_command_async>(runtime_symbol(dispatch.library, "mpv_command_async"));
+	dispatch.set_property_string = reinterpret_cast<PFN_mpv_set_property_string>(runtime_symbol(dispatch.library, "mpv_set_property_string"));
+	dispatch.set_property_async = reinterpret_cast<PFN_mpv_set_property_async>(runtime_symbol(dispatch.library, "mpv_set_property_async"));
+	dispatch.get_property = reinterpret_cast<PFN_mpv_get_property>(runtime_symbol(dispatch.library, "mpv_get_property"));
+	dispatch.get_property_string = reinterpret_cast<PFN_mpv_get_property_string>(runtime_symbol(dispatch.library, "mpv_get_property_string"));
+	dispatch.free_fn = reinterpret_cast<PFN_mpv_free>(runtime_symbol(dispatch.library, "mpv_free"));
+	dispatch.wait_event = reinterpret_cast<PFN_mpv_wait_event>(runtime_symbol(dispatch.library, "mpv_wait_event"));
+	dispatch.set_godot_audio_callback = reinterpret_cast<PFN_mpv_godot_audio_set_callback>(runtime_symbol(dispatch.library, "mpv_godot_audio_set_callback"));
 
 	if (!dispatch.create || !dispatch.initialize || !dispatch.terminate_destroy || !dispatch.error_string || !dispatch.set_option_string || !dispatch.command || !dispatch.command_async || !dispatch.set_property_string || !dispatch.get_property || !dispatch.free_fn || !dispatch.wait_event || !dispatch.set_godot_audio_callback) {
 		String missing;
@@ -209,26 +191,20 @@ bool load_mpv_dispatch(String &r_error) {
 			missing += " mpv_godot_audio_set_callback";
 		}
 		r_error = "failed to resolve required libmpv symbols from " + loaded_from + ":" + missing;
-		FreeLibrary(dispatch.library);
+		close_runtime(dispatch.library);
 		dispatch = MpvDispatch();
 		return false;
 	}
 
 	return true;
-#else
-	r_error = "libmpv smoke test currently only supports Windows";
-	return false;
-#endif
 }
 
 void unload_mpv_dispatch() {
-#ifdef _WIN32
 	MpvDispatch &dispatch = get_dispatch();
 	if (dispatch.library) {
-		FreeLibrary(dispatch.library);
+		close_runtime(dispatch.library);
 	}
 	dispatch = MpvDispatch();
-#endif
 }
 
 } // namespace

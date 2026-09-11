@@ -35,10 +35,8 @@ private:
 	};
 
 	struct RenderDispatch {
-#ifdef _WIN32
 		void *library = nullptr;
 		void *vulkan_library = nullptr;
-#endif
 		PFN_mpv_render_context_create create = nullptr;
 		PFN_mpv_render_context_set_update_callback set_update_callback = nullptr;
 		PFN_mpv_render_context_update update = nullptr;

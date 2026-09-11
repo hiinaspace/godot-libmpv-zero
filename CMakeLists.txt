@@ -81,7 +81,7 @@ if(DOC_XML)
     endif()
 endif()
 
-target_link_libraries(${LIBNAME} PRIVATE godot-cpp)
+target_link_libraries(${LIBNAME} PRIVATE godot-cpp ${CMAKE_DL_LIBS})
 
 # Require at least C++17 for this target
 set_property(TARGET ${LIBNAME} PROPERTY CXX_STANDARD 17)
@@ -89,7 +89,8 @@ set_property(TARGET ${LIBNAME} PROPERTY CXX_STANDARD 17)
 set_target_properties(${LIBNAME}
     PROPERTIES
     # The generator expression here prevents msvc from adding a Debug or Release subdir.
-    RUNTIME_OUTPUT_DIRECTORY "$<1:${PROJECT_SOURCE_DIR}/bin/${GODOTCPP_PLATFORM}>"
+    RUNTIME_OUTPUT_DIRECTORY "$<1:${CMAKE_BINARY_DIR}/bin>"
+    LIBRARY_OUTPUT_DIRECTORY "$<1:${CMAKE_BINARY_DIR}/bin>"
 
     PREFIX ""
     OUTPUT_NAME "${LIBNAME}${GODOTCPP_SUFFIX}"
@@ -98,6 +99,7 @@ set_target_properties(${LIBNAME}
 set(GODOT_PROJECT_BINARY_DIR "${PROJECT_SOURCE_DIR}/${GODOT_PROJECT_DIR}/bin/${GODOTCPP_PLATFORM}")
 
 add_custom_command(TARGET ${LIBNAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${GODOT_PROJECT_BINARY_DIR}"
     COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:${LIBNAME}>" "${GODOT_PROJECT_BINARY_DIR}/$<TARGET_FILE_NAME:${LIBNAME}>"
 )
 
