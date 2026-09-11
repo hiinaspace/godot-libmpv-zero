@@ -14,6 +14,12 @@
       system = "x86_64-linux";
       pkgs = import nixpkgs { inherit system; };
       godot = import ./nix/godot-official.nix { inherit pkgs; };
+      godot-interop = pkgs.godot_4.overrideAttrs (old: {
+        patches = (old.patches or [ ]) ++ [
+          ./patches/godot/0001-enable-libplacebo-device-features.patch
+        ];
+        sconsFlags = old.sconsFlags ++ [ "use_static_cpp=false" ];
+      });
       libplacebo = pkgs.libplacebo.overrideAttrs (old: {
         patches = (old.patches or [ ]) ++ [
           ./patches/libplacebo/0001-lower-empty-synchronization-scopes.patch
@@ -32,7 +38,7 @@
         '';
       });
     in {
-      packages.${system} = { inherit mpv godot; };
+      packages.${system} = { inherit mpv godot godot-interop; };
       devShells.${system}.default = pkgs.mkShell {
         packages = with pkgs; [
           cmake ninja pkg-config python3 scons patchelf binutils gdb

@@ -1,0 +1,25 @@
+--- a/drivers/vulkan/rendering_device_driver_vulkan.cpp
++++ b/drivers/vulkan/rendering_device_driver_vulkan.cpp
+@@ -1483,6 +1483,22 @@
+ 		}
+ 	}
+ 
++	// Prototype shared-device libplacebo support. Only enable features that the
++	// physical device actually supports; libmpv requires both for device import.
++	VkPhysicalDeviceHostQueryResetFeatures mpv_query = {};
++	mpv_query.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_QUERY_RESET_FEATURES;
++	VkPhysicalDeviceTimelineSemaphoreFeatures mpv_timeline = {};
++	mpv_timeline.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES;
++	mpv_timeline.pNext = &mpv_query;
++	VkPhysicalDeviceFeatures2 mpv_features = {};
++	mpv_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
++	mpv_features.pNext = &mpv_timeline;
++	vkGetPhysicalDeviceFeatures2(physical_device, &mpv_features);
++	ERR_FAIL_COND_V_MSG(!mpv_query.hostQueryReset || !mpv_timeline.timelineSemaphore,
++			ERR_UNAVAILABLE, "libmpv requires timelineSemaphore and hostQueryReset.");
++	mpv_query.pNext = create_info_next;
++	create_info_next = &mpv_timeline;
++
+ 	VkDeviceCreateInfo create_info = {};
+ 	create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+ 	create_info.pNext = create_info_next;
