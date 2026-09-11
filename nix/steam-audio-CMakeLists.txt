@@ -1,0 +1,12 @@
+cmake_minimum_required(VERSION 3.20)
+project(godot-steam-audio LANGUAGES CXX)
+add_subdirectory("${GODOT_CPP_SOURCE}" godot-cpp)
+file(GLOB SOURCES CONFIGURE_DEPENDS src/*.cpp)
+add_library(godot-steam-audio SHARED ${SOURCES})
+target_include_directories(godot-steam-audio PRIVATE src "${STEAM_AUDIO_SDK}/include")
+target_link_libraries(godot-steam-audio PRIVATE godot-cpp "${STEAM_AUDIO_SDK}/lib/linux-x64/libphonon.so")
+target_link_options(godot-steam-audio PRIVATE "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/linux_symbols.map")
+target_compile_features(godot-steam-audio PRIVATE cxx_std_17)
+set_target_properties(godot-steam-audio PROPERTIES
+  OUTPUT_NAME "godot-steam-audio.linux.template_debug.x86_64"
+  BUILD_RPATH "$ORIGIN")

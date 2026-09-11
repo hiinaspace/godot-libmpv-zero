@@ -14,6 +14,7 @@
       system = "x86_64-linux";
       pkgs = import nixpkgs { inherit system; };
       godot = import ./nix/godot-official.nix { inherit pkgs; };
+      steam-audio = import ./nix/steam-audio.nix { inherit pkgs; };
       godot-interop = pkgs.godot_4.overrideAttrs (old: {
         patches = (old.patches or [ ]) ++ [
           ./patches/godot/0001-enable-libplacebo-device-features.patch
@@ -38,7 +39,7 @@
         '';
       });
     in {
-      packages.${system} = { inherit mpv godot godot-interop; };
+      packages.${system} = { inherit mpv godot godot-interop steam-audio; };
       devShells.${system}.default = pkgs.mkShell {
         packages = with pkgs; [
           cmake ninja pkg-config python3 scons patchelf binutils gdb
