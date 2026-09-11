@@ -29,22 +29,33 @@ var _left_by_ready := true
 var _right_ax_ready := true
 var _right_by_ready := true
 var xr_interface: XRInterface
+var _flat_mode := false
 
 func _ready() -> void:
 	_auto_quit = OS.get_environment("LIBMPV_ZERO_AUTOQUIT") == "1"
 	_auto_reload_after = float(OS.get_environment("LIBMPV_ZERO_RELOAD_AFTER"))
 	_trace_frame_gaps = OS.get_environment("LIBMPV_ZERO_TRACE_FRAME_GAPS") == "1"
-	xr_interface = XRServer.find_interface("OpenXR")
+	_flat_mode = "--flat" in OS.get_cmdline_user_args()
+	if not _flat_mode:
+		xr_interface = XRServer.find_interface("OpenXR")
 	if xr_interface:
 		if not xr_interface.is_initialized():
 			xr_interface.initialize()
 		if xr_interface.is_initialized():
 			DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
 			get_viewport().use_xr = true
+			_xr_origin.add_child(OpenXRRenderModelManager.new())
 		else:
 			push_warning("OpenXR failed to initialize, please check if your headset is connected")
-	else:
+	elif not _flat_mode:
 		push_warning("OpenXR not initialized, please check if your headset is connected")
+	if _flat_mode:
+		var camera := Camera3D.new()
+		add_child(camera)
+		camera.position = Vector3(0, 1.6, 3)
+		camera.look_at(_emissive_screen.global_position)
+		$XROrigin3D/XRCamera3D/SteamAudioListener.reparent(camera)
+		camera.make_current()
 
 	_media_source = _resolve_media_source()
 	_capture_screen_defaults()
