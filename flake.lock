@@ -1,0 +1,45 @@
+{
+  "nodes": {
+    "mpv-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1775067691,
+        "narHash": "sha256-toMz9q09huUrDf1btDSBYGXDE21uenOhH1N162U0U7g=",
+        "owner": "hiinaspace",
+        "repo": "mpv",
+        "rev": "970250ad1480e78ca03999e1733d212278f07dbb",
+        "type": "github"
+      },
+      "original": {
+        "owner": "hiinaspace",
+        "repo": "mpv",
+        "rev": "970250ad1480e78ca03999e1733d212278f07dbb",
+        "type": "github"
+      }
+    },
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 1788752844,
+        "narHash": "sha256-VaWGJ6+cIYN2erfSecbRV+4ljI185Ty2wUrXyvQbgOw=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "dc5d91f840324650bac8c379428c7037a416959a",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "dc5d91f840324650bac8c379428c7037a416959a",
+        "type": "github"
+      }
+    },
+    "root": {
+      "inputs": {
+        "mpv-src": "mpv-src",
+        "nixpkgs": "nixpkgs"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}
