@@ -10,7 +10,7 @@ let
   };
   profile = pkgs.writeText "steam-audio-build-profile.json" (builtins.toJSON {
     enabled_classes = [
-      "AudioFrame" "AudioStream" "AudioStreamPlayback" "AudioStreamPlayer3D"
+      "AudioServer" "AudioFrame" "AudioStream" "AudioStreamPlayback" "AudioStreamPlayer3D"
       "ArrayMesh" "BoxMesh" "BoxShape3D" "CapsuleMesh" "CapsuleShape3D"
       "CollisionShape3D" "ConcavePolygonShape3D" "CylinderMesh" "CylinderShape3D"
       "Engine" "Mesh" "MeshInstance3D" "Node3D" "OS" "ProjectSettings"
@@ -27,6 +27,7 @@ in pkgs.stdenv.mkDerivation {
   patches = [
     ../patches/steam-audio/0001-release-server-before-scene-bindings.patch
     ../patches/steam-audio/0002-include-used-standard-headers.patch
+    ../patches/steam-audio/0003-detach-all-retired-playbacks-from-the-player.patch
   ];
   nativeBuildInputs = with pkgs; [ cmake ninja python3 autoPatchelfHook ];
   buildInputs = [ pkgs.stdenv.cc.cc.lib ];
