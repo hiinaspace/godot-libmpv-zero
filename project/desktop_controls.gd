@@ -70,13 +70,18 @@ func _process(_delta: float) -> void:
 	if not dragging:
 		timeline.set_value_no_signal(position)
 	position_label.text = "%s / %s" % [timestamp(position), timestamp(duration)]
-	pause_button.text = "Play [Space]" if player.is_paused() else "Pause [Space]"
+	pause_button.text = "Pause [Space]" if player.is_playing() else "Play [Space]"
 
 func timestamp(seconds: float) -> String:
 	return "%d:%02d:%02d" % [int(seconds) / 3600, int(seconds) / 60 % 60, int(seconds) % 60]
 
 func toggle_pause() -> void:
-	player.set_paused(not player.is_paused())
+	if player.is_playing():
+		player.pause()
+	else:
+		if player.get_duration() > 0 and player.get_playback_position() >= player.get_duration() - 0.1:
+			player.seek(0)
+		player.play()
 
 func seek_by(seconds: float) -> void:
 	player.seek(clampf(player.get_playback_position() + seconds, 0, maxf(player.get_duration(), 0)))
