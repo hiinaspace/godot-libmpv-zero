@@ -298,7 +298,12 @@ Ref<AudioStream> MPVPlayer::get_audio_stream_for_channel(int p_channel_index) co
 }
 
 Dictionary MPVPlayer::get_audio_diagnostics() const {
+	// Snapshot both channels at a mixer-block boundary. Sampling between the
+	// left and right callbacks otherwise reports a transient clock difference.
+	AudioServer *audio_server = AudioServer::get_singleton();
+	audio_server->lock();
 	const libmpv_zero::AudioBridge::Diagnostics diagnostics = audio_bridge->get_diagnostics();
+	audio_server->unlock();
 
 	Dictionary result;
 	result["sample_rate"] = diagnostics.sample_rate;
@@ -592,8 +597,12 @@ void MPVPlayer::_sync_audio_targets() {
 		return;
 	}
 
+	// Replace/unpause the two speaker playbacks as one mixer transaction.
+	AudioServer *audio_server = AudioServer::get_singleton();
+	audio_server->lock();
 	_configure_audio_target(_resolve_target(left_audio_target_path), 0);
 	_configure_audio_target(_resolve_target(right_audio_target_path), 1);
+	audio_server->unlock();
 }
 
 void MPVPlayer::_configure_audio_target(Node *p_target, int p_channel_index) {
