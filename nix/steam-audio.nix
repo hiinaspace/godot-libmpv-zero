@@ -28,6 +28,7 @@ in pkgs.stdenv.mkDerivation {
     ../patches/steam-audio/0001-release-server-before-scene-bindings.patch
     ../patches/steam-audio/0002-include-used-standard-headers.patch
     ../patches/steam-audio/0003-detach-all-retired-playbacks-from-the-player.patch
+    ../patches/steam-audio/0004-adapt-fixed-processing-blocks-to-mixer-requests.patch
   ];
   nativeBuildInputs = with pkgs; [ cmake ninja python3 autoPatchelfHook ];
   buildInputs = [ pkgs.stdenv.cc.cc.lib ];

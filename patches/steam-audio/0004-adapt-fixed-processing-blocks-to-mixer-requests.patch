@@ -1,0 +1,144 @@
+--- a/src/stream.hpp
++++ b/src/stream.hpp
+@@ -4,6 +4,7 @@
+ #include "godot_cpp/classes/ref.hpp"
+ #include "player.hpp"
+ #include <phonon.h>
++#include <vector>
+ #include <godot_cpp/classes/audio_frame.hpp>
+ #include <godot_cpp/classes/audio_stream.hpp>
+ #include <godot_cpp/classes/audio_stream_playback.hpp>
+@@ -41,6 +42,10 @@
+ 	Ref<AudioStreamPlayback> stream_playback;
+ 
+ 	std::atomic<bool> is_active{false};
++	std::vector<AudioFrame> processed_block;
++	int processed_offset = 0;
++	int processed_remaining = 0;
++	int32_t mix_block(AudioFrame *buffer, float rate_scale, int32_t frames);
+ 
+ protected:
+ 	static void _bind_methods();
+--- a/src/stream.cpp
++++ b/src/stream.cpp
+@@ -37,6 +37,40 @@
+ int32_t SteamAudioStreamPlayback::_mix(AudioFrame *buffer, float rate_scale, int32_t frames) {
+ 	AudioMixerLock mixer_lock;
+ 	std::fill_n(buffer, frames, AudioFrame{});
++	if (!parent || !*parent || stream_playback.is_null()) {
++		return frames;
++	}
++	auto gs = SteamAudioServer::get_singleton()->get_global_state(false);
++	if (!gs || gs->audio_cfg.frameSize <= 0) {
++		return frames;
++	}
++	const int block_size = gs->audio_cfg.frameSize;
++	if (int(processed_block.size()) != block_size) {
++		processed_block.resize(block_size);
++		processed_remaining = 0;
++	}
++	// Steam Audio requires full, fixed-size blocks. Preserve the remainder
++	// between Godot requests instead of dropping samples or processing stale
++	// input when the mixer asks for a smaller or larger number of frames.
++	int written = 0;
++	while (written < frames) {
++		if (processed_remaining == 0) {
++			mix_block(processed_block.data(), rate_scale, block_size);
++			processed_offset = 0;
++			processed_remaining = block_size;
++		}
++		const int count = std::min(frames - written, processed_remaining);
++		std::copy_n(processed_block.data() + processed_offset, count, buffer + written);
++		processed_offset += count;
++		processed_remaining -= count;
++		written += count;
++	}
++	return frames;
++}
++
++int32_t SteamAudioStreamPlayback::mix_block(AudioFrame *buffer, float rate_scale, int32_t frames) {
++	AudioMixerLock mixer_lock;
++	std::fill_n(buffer, frames, AudioFrame{});
+ 	SteamAudioPlayer *player = parent ? *parent : nullptr;
+ 	if (player == nullptr) {
+ 		return frames;
+@@ -68,16 +102,9 @@
+ 	}
+ 
+ 	PackedVector2Array mixed_frames = stream_playback->mix_audio(rate_scale, frames);
+-	frames = int(mixed_frames.size());
+-
+-	auto gs_local = SteamAudioServer::get_singleton()->get_global_state(false);
+-	if (gs_local != nullptr && frames > gs_local->audio_cfg.frameSize) {
+-		frames = gs_local->audio_cfg.frameSize;
+-	}
+-
+ 	for (int i = 0; i < frames; i++) {
+-		ls->bufs.in.data[0][i] = mixed_frames[i].x;
+-		ls->bufs.in.data[1][i] = mixed_frames[i].y;
++		ls->bufs.in.data[0][i] = i < mixed_frames.size() ? mixed_frames[i].x : 0.0f;
++		ls->bufs.in.data[1][i] = i < mixed_frames.size() ? mixed_frames[i].y : 0.0f;
+ 	}
+ 
+ 	if (ls->cfg.is_air_absorp_on) {
+@@ -137,6 +164,9 @@
+ 				&ls->bufs.ambi, &ls->bufs.out);
+ 		SteamAudio::log(SteamAudio::log_debug, "mixing: finished ambisonics");
+ 	} else {
++		for (int channel = 0; channel < ls->bufs.out.numChannels; ++channel) {
++			std::fill_n(ls->bufs.out.data[channel], ls->bufs.out.numSamples, 0.0f);
++		}
+ 		iplAudioBufferMix(gs->ctx, &ls->bufs.direct, &ls->bufs.out);
+ 	}
+ 
+@@ -176,14 +206,19 @@
+ 		return 0;
+ 	}
+ 
++	processed_remaining = 0;
+ 	stream = p_stream;
+ 	stream_playback = stream->instantiate_playback();
+ 	stream_playback->start(p_from_offset);
++	is_active.store(true);
+ 
+ 	return 0;
+ }
+ 
+ void SteamAudioStreamPlayback::_start(double from_pos) {
++	AudioMixerLock mixer_lock;
++	processed_remaining = 0;
++	is_active.store(true);
+ 	if (stream_playback == nullptr) {
+ 		if (stream != nullptr) {
+ 			is_active.store(true);
+@@ -198,6 +233,8 @@
+ }
+ 
+ void SteamAudioStreamPlayback::_stop() {
++	AudioMixerLock mixer_lock;
++	processed_remaining = 0;
+ 	is_active.store(false);
+ 	if (stream_playback == nullptr || !stream_playback->is_playing()) {
+ 		return;
+--- a/src/server_init.cpp
++++ b/src/server_init.cpp
+@@ -1,4 +1,5 @@
+ #include "server_init.hpp"
++#include <godot_cpp/classes/audio_server.hpp>
+ #include "config.hpp"
+ #include "phonon.h"
+ #include "steam_audio.hpp"
+@@ -8,10 +9,9 @@
+ using namespace godot;
+ 
+ IPLAudioSettings create_audio_cfg() {
+-	int sample_rate = ProjectSettings::get_singleton()->get_setting("audio/driver/mix_rate");
+-	int output_latency = ProjectSettings::get_singleton()->get_setting("audio/driver/output_latency");
+-	int frame_size = closest_power_of_2(output_latency * sample_rate / 1000);
+-	return IPLAudioSettings{ sample_rate, int(frame_size) };
++	// HRTF processing blocks are independent of the output device's latency.
++	// The playback adapter handles arbitrary Godot mixer request sizes.
++	return IPLAudioSettings{ int(AudioServer::get_singleton()->get_mix_rate()), 512 };
+ }
+ 
+ IPLHRTF create_hrtf(IPLContext ctx, IPLAudioSettings audio_cfg) {

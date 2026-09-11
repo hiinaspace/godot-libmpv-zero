@@ -39,6 +39,38 @@ func _run() -> void:
 		var samples := playback.mix_audio(1.0, 512)
 		check(samples.size() == 512, "initial block size")
 		check(samples[256].length() > 0.01, "initial audio is audible")
+	var current := speaker.get_stream_playback()
+	for count in [64, 128, 256, 1024, 2048, 73, 512]:
+		var samples := current.mix_audio(1.0, count)
+		check(samples.size() == count, "mixer must preserve request size %d" % count)
+		var incorrect := 0
+		for sample in samples:
+			if absf(sample.x - 0.125) > 0.001 or absf(sample.y - 0.125) > 0.001:
+				incorrect += 1
+		check(incorrect == 0, "mixer must preserve every source sample without accumulating old output")
+	current = null
+	# Compare a nonconstant source against Godot's direct playback so request
+	# partitioning cannot hide duplicated, reordered, or dropped PCM samples.
+	for index in range(48000):
+		pcm.encode_s16(index * 2, (index * 7919) % 16384 - 8192)
+	wav.data = pcm
+	var direct := wav.instantiate_playback()
+	direct.start()
+	speaker.call("play_stream", wav)
+	current = speaker.get_stream_playback()
+	var mismatched := 0
+	for count in [73, 1024, 64, 2048, 256, 128, 512]:
+		var expected := direct.mix_audio(1.0, count)
+		var actual := current.mix_audio(1.0, count)
+		check(actual.size() == expected.size(), "partitioned block length")
+		for index in range(mini(actual.size(), expected.size())):
+			if actual[index].distance_to(expected[index]) > 0.00001:
+				mismatched += 1
+	check(mismatched == 0, "partitioned requests changed %d source samples" % mismatched)
+	direct.stop()
+	direct = null
+	retired.append(current)
+	current = null
 	var retained_stream := speaker.stream
 	speaker.free()
 	# Include a playback created after its former owner has been freed.
