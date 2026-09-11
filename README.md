@@ -3,19 +3,19 @@
 See the [September 2026 dependency reassessment and Linux/Windows theater plan](REASSESSMENT-2026-09.md)
 for current direction. [Linux development instructions](LINUX.md) cover the
 patched Godot build, pinned dependencies, and automated Steam Audio playback
-check. Linux desktop playback now runs; sustained synchronization and release
-packaging remain in progress. The Windows instructions below describe the
-earlier prototype and need revalidation against the current patches.
+checks. Linux desktop playback, a ten-minute soak and scoped stress checks pass;
+PCVR validation and release packaging remain in progress. The Windows instructions
+below describe the earlier prototype and need revalidation against the current patches.
 
 Experimental Godot 4 GDExtension for `libmpv`-backed video playback with:
 
 - Vulkan external-image video rendering
-- forked `libmpv` audio callback support
+- consumer-driven audio output from patched `libmpv`
 - per-channel Godot `AudioStream` playback
 - scene-friendly `MPVPlayer` + `MPVTexture` API
 - VR/OpenXR sample scenes
 - Steam Audio validation in the sample project
-- transport operations tuned to avoid noticeable VR frame hitches on tested hardware
+- pause, seek and reload controls with automated playback checks
 
 ## Repository layout
 
@@ -27,6 +27,11 @@ Experimental Godot 4 GDExtension for `libmpv`-backed video playback with:
 
 ## Windows local build
 
+These helpers describe the earlier prototype. Existing CI dependency artifacts
+do not include the current changes under `patches/`. A current Windows build
+needs matching patched mpv, libplacebo, Godot and Steam Audio binaries, followed
+by Windows runtime validation and updated artifact pins.
+
 Requirements:
 
 - Visual Studio 2022 with MSVC toolchain
@@ -34,7 +39,7 @@ Requirements:
 - `gh` authenticated if you want to pull CI-built `mpv` artifacts
 - `godot-cpp` submodule initialized
 
-Stage the current Windows `mpv` package from GitHub Actions:
+The historical artifact-staging command is:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\tools\setup_windows_mpv_dev.ps1
@@ -127,7 +132,8 @@ Earlier Windows prototype milestones (not revalidated with the current patches):
 Known rough edges:
 
 - Current Linux/Windows portable release bundles are not validated yet
-- Linux playback and teardown checks are in progress; see [Linux notes](LINUX.md)
+- Physical A/V sync and headset playback still need manual validation; see [Linux notes](LINUX.md)
 - startup / first-frame bring-up is still noticeable
 
-This is still prototype software, but the core playback path is now usable enough for external testing and prerelease builds.
+Use the pinned Linux development environment for current local testing. PCVR
+validation and portable builds for external testers remain separate steps.
