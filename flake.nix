@@ -33,6 +33,7 @@
         src = mpv-src;
         patches = (old.patches or [ ]) ++ [
           ./patches/mpv/0001-finish-vulkan-handoff-before-return.patch
+          ./patches/mpv/0002-drive-audio-from-consumer-queue.patch
         ];
         doInstallCheck = false; # The fork reports its upstream version.
         postInstall = old.postInstall + ''

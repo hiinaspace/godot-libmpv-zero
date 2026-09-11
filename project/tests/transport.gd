@@ -37,9 +37,20 @@ func _run() -> void:
 		check(player.get_audio_diagnostics().consumed_frames_per_channel == before_pause.consumed_frames_per_channel,
 			"audio consumed while paused")
 
+		var old_stream: AudioStream = player.get_audio_stream_for_channel(0)
 		player.seek(2.0)
-		check(await wait_for(func(): return absf(player.get_playback_position() - 2.0) < 0.2), "paused seek")
+		# The public position changes optimistically when a seek is queued.
+		# Wait for the AO reset as well before testing the retired reader.
+		check(await wait_for(func(): return (absf(player.get_playback_position() - 2.0) < 0.2 and
+			player.get_audio_diagnostics().generation > before_pause.generation)), "paused seek and audio reset")
 		check(player.is_paused(), "seek unexpectedly resumes playback")
+		var old_playback := old_stream.instantiate_playback()
+		old_playback.start()
+		for frame in old_playback.mix_audio(1.0, 256):
+			check(frame == Vector2.ZERO, "retired playback consumed PCM after seek")
+		old_playback.stop()
+		old_playback = null
+		old_stream = null
 		player.play()
 		check(await wait_for(func(): return player.get_playback_position() > 2.8), "resume advances")
 		player.seek(0.5)

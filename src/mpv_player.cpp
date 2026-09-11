@@ -1,6 +1,8 @@
 #include "mpv_player.h"
 
 #include "audio_bridge.h"
+#include <godot_cpp/classes/audio_server.hpp>
+#include <godot_cpp/variant/packed_int64_array.hpp>
 #include "mpv_core.h"
 #include "mpv_texture.h"
 #include "video_output_backend.h"
@@ -115,7 +117,13 @@ void MPVPlayer::_ready() {
 	set_process(true);
 }
 
-void MPVPlayer::_process(double /*p_delta*/) {
+void MPVPlayer::_process(double p_delta) {
+	latency_refresh_remaining -= p_delta;
+	if (latency_refresh_remaining <= 0) {
+		// Query the driver outside bridge locks and never from its mix callback.
+		audio_bridge->set_output_latency(AudioServer::get_singleton()->get_output_latency());
+		latency_refresh_remaining = 1.0;
+	}
 	_sync_mpv_state();
 }
 
@@ -195,8 +203,6 @@ void MPVPlayer::load(const String &p_source) {
 void MPVPlayer::load_file(const String &p_path) {
 	trace_load_log(vformat("MPVPlayer::load_file requested %s", p_path));
 	source = p_path;
-	audio_bridge->clear_queued_audio();
-	audio_bridge->set_playback_active(false);
 	paused_requested = false;
 	_sync_output_texture();
 	_sync_audio_targets();
@@ -214,7 +220,6 @@ void MPVPlayer::load_file(const String &p_path) {
 
 void MPVPlayer::play() {
 	paused_requested = false;
-	audio_bridge->set_playback_active(true);
 	_sync_output_texture();
 	if ((video_output_backend && !video_output_backend->is_ready_for_playback()) || (mpv_core && mpv_core->is_loading())) {
 		pending_play = true;
@@ -232,7 +237,6 @@ void MPVPlayer::play() {
 void MPVPlayer::pause() {
 	paused_requested = true;
 	mpv_core->pause();
-	audio_bridge->set_playback_active(false);
 	_sync_output_texture();
 	_sync_audio_targets();
 }
@@ -240,9 +244,6 @@ void MPVPlayer::pause() {
 void MPVPlayer::stop() {
 	paused_requested = false;
 	mpv_core->stop();
-	audio_bridge->clear_queued_audio();
-	audio_bridge->set_playback_active(false);
-	audio_bridge->set_source_active(false);
 	waiting_for_playback_restart = false;
 	video_texture.unref();
 	_sync_output_texture();
@@ -305,23 +306,26 @@ Dictionary MPVPlayer::get_audio_diagnostics() const {
 	result["max_queued_frames"] = diagnostics.max_queued_frames;
 	result["total_queued_frames"] = diagnostics.total_queued_frames;
 	result["underrun_count"] = diagnostics.underrun_count;
+	result["capacity_frames"] = diagnostics.capacity_frames;
+	result["generation"] = diagnostics.generation;
+	result["estimated_delay_seconds"] = diagnostics.estimated_delay_seconds;
 	PackedInt32Array per_channel;
 	for (int queued_frames : diagnostics.queued_frames_per_channel) {
 		per_channel.push_back(queued_frames);
 	}
 	result["queued_frames_per_channel"] = per_channel;
-	PackedInt32Array pull_calls;
-	for (int pull_count : diagnostics.pull_calls_per_channel) {
+	PackedInt64Array pull_calls;
+	for (int64_t pull_count : diagnostics.pull_calls_per_channel) {
 		pull_calls.push_back(pull_count);
 	}
 	result["pull_calls_per_channel"] = pull_calls;
-	PackedInt32Array pulled_frames;
-	for (int frame_count : diagnostics.pulled_frames_per_channel) {
+	PackedInt64Array pulled_frames;
+	for (int64_t frame_count : diagnostics.pulled_frames_per_channel) {
 		pulled_frames.push_back(frame_count);
 	}
 	result["pulled_frames_per_channel"] = pulled_frames;
-	PackedInt32Array consumed_frames;
-	for (int frame_count : diagnostics.consumed_frames_per_channel) {
+	PackedInt64Array consumed_frames;
+	for (int64_t frame_count : diagnostics.consumed_frames_per_channel) {
 		consumed_frames.push_back(frame_count);
 	}
 	result["consumed_frames_per_channel"] = consumed_frames;
@@ -451,7 +455,6 @@ void MPVPlayer::_sync_mpv_state() {
 
 	if (poll_result.file_loaded) {
 		trace_load_log("sync: file_loaded");
-		audio_bridge->set_source_active(true);
 		_sync_audio_targets();
 		emit_signal("file_loaded");
 	}
@@ -459,8 +462,6 @@ void MPVPlayer::_sync_mpv_state() {
 		emit_signal("position_changed", mpv_core->get_time_pos());
 	}
 	if (poll_result.playback_finished || poll_result.eof_reached) {
-		audio_bridge->set_playback_active(false);
-		audio_bridge->set_source_active(false);
 		paused_requested = false;
 		waiting_for_playback_restart = false;
 		_sync_output_texture();
@@ -536,7 +537,7 @@ void MPVPlayer::_configure_mpv_core_for_backend() {
 bool MPVPlayer::_initialize_runtime() {
 	_configure_mpv_core_for_backend();
 	audio_bridge->reset();
-	mpv_core->set_audio_callback(audio_bridge.get(), &libmpv_zero::AudioBridge::mpv_audio_callback);
+	mpv_core->set_audio_sink(audio_bridge.get(), &libmpv_zero::AudioBridge::sink);
 
 	if (!mpv_core->initialize()) {
 		UtilityFunctions::push_warning("MPVPlayer: " + mpv_core->get_status());
@@ -638,12 +639,31 @@ void MPVPlayer::_set_audio_target_stream(Node *p_target, const Ref<AudioStream> 
 	}
 
 	if (supports_play_stream) {
-		p_target->call("play_stream", p_stream, 0.0, 0.0, 1.0);
+		// Steam Audio replaces its inner playback in play_stream(). Serialize
+		// that replacement with mixing, and preserve the resampler on pause or
+		// repeated state notifications for an unchanged stream.
+		AudioServer *audio_server = AudioServer::get_singleton();
+		audio_server->lock();
+		Ref<AudioStream> current;
+		if (p_target->has_method("get_inner_stream")) {
+			current = p_target->call("get_inner_stream");
+		}
+		const bool has_playback = p_target->has_method("has_stream_playback") && bool(p_target->call("has_stream_playback"));
+		if (current != p_stream || !has_playback) {
+			p_target->call("play_stream", p_stream, 0.0, 0.0, 1.0);
+		}
+		audio_server->unlock();
 		return;
 	}
 
 	if (supports_set_stream) {
-		p_target->call("set_stream", p_stream);
+		Ref<AudioStream> current;
+		if (p_target->has_method("get_stream")) {
+			current = p_target->call("get_stream");
+		}
+		if (current != p_stream) {
+			p_target->call("set_stream", p_stream);
+		}
 	}
 
 	if (p_target->has_method("is_playing")) {

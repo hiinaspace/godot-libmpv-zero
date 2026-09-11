@@ -11,13 +11,14 @@ void ChannelAudioStream::_bind_methods() {}
 Ref<AudioStreamPlayback> ChannelAudioStream::_instantiate_playback() const {
 	Ref<ChannelAudioStreamPlayback> playback;
 	playback.instantiate();
-	playback->configure(bridge.lock(), channel_index);
+	playback->configure(bridge.lock(), channel_index, generation);
 	return playback;
 }
 
-void ChannelAudioStream::configure(const std::weak_ptr<libmpv_zero::AudioBridge> &p_bridge, int p_channel_index) {
+void ChannelAudioStream::configure(const std::weak_ptr<libmpv_zero::AudioBridge> &p_bridge, int p_channel_index, uint64_t p_generation) {
 	bridge = p_bridge;
 	channel_index = p_channel_index;
+	generation = p_generation;
 }
 
 int ChannelAudioStream::get_channel_index() const {
@@ -38,9 +39,10 @@ bool ChannelAudioStream::_is_monophonic() const {
 
 void ChannelAudioStreamPlayback::_bind_methods() {}
 
-void ChannelAudioStreamPlayback::configure(const std::shared_ptr<libmpv_zero::AudioBridge> &p_bridge, int p_channel_index) {
+void ChannelAudioStreamPlayback::configure(const std::shared_ptr<libmpv_zero::AudioBridge> &p_bridge, int p_channel_index, uint64_t p_generation) {
 	bridge = p_bridge;
 	channel_index = p_channel_index;
+	generation = p_generation;
 }
 
 int32_t ChannelAudioStreamPlayback::_mix_resampled(AudioFrame *p_buffer, int32_t p_frames) {
@@ -57,8 +59,7 @@ int32_t ChannelAudioStreamPlayback::_mix_resampled(AudioFrame *p_buffer, int32_t
 		return p_frames;
 	}
 
-	bridge->note_channel_pull(channel_index, p_frames);
-	return bridge->pull_channel_frames(channel_index, p_buffer, p_frames);
+	return bridge->pull_channel_frames(channel_index, generation, p_buffer, p_frames);
 }
 
 float ChannelAudioStreamPlayback::_get_stream_sampling_rate() const {
@@ -70,20 +71,22 @@ float ChannelAudioStreamPlayback::_get_stream_sampling_rate() const {
 }
 
 void ChannelAudioStreamPlayback::_start(double /*p_from_pos*/) {
-	is_active.store(true);
-	begin_resample();
-	if (bridge != nullptr && channel_index >= 0) {
-		bridge->set_channel_playing(channel_index, true);
+	if (!is_active.exchange(true) && bridge != nullptr && channel_index >= 0) {
+		bridge->set_channel_playing(channel_index, generation, true);
 	}
+	begin_resample();
 }
 
 void ChannelAudioStreamPlayback::_stop() {
-	is_active.store(false);
-	if (bridge != nullptr && channel_index >= 0) {
-		bridge->set_channel_playing(channel_index, false);
+	if (is_active.exchange(false) && bridge != nullptr && channel_index >= 0) {
+		bridge->set_channel_playing(channel_index, generation, false);
 	}
 }
 
 bool ChannelAudioStreamPlayback::_is_playing() const {
 	return is_active.load();
+}
+
+ChannelAudioStreamPlayback::~ChannelAudioStreamPlayback() {
+	_stop();
 }

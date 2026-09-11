@@ -4,7 +4,7 @@ repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$repo_dir"
 test_name=${1:-playback_smoke}
 case "$test_name" in
-  playback_smoke|transport) ;;
+  playback_smoke|transport|consumer_stall) ;;
   *) echo "Unknown test: $test_name" >&2; exit 2 ;;
 esac
 output_dir=${LIBMPV_ZERO_TEST_OUTPUT:-$repo_dir/.local/linux-smoke/$(date +%Y%m%d-%H%M%S)}

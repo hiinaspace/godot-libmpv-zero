@@ -34,7 +34,7 @@ struct MpvDispatch {
 	PFN_mpv_get_property_string get_property_string = nullptr;
 	PFN_mpv_free free_fn = nullptr;
 	PFN_mpv_wait_event wait_event = nullptr;
-	PFN_mpv_godot_audio_set_callback set_godot_audio_callback = nullptr;
+	PFN_mpv_godot_audio_set_sink set_godot_audio_sink = nullptr;
 };
 
 MpvDispatch &get_dispatch() {
@@ -150,9 +150,9 @@ bool load_mpv_dispatch(String &r_error) {
 	dispatch.get_property_string = reinterpret_cast<PFN_mpv_get_property_string>(runtime_symbol(dispatch.library, "mpv_get_property_string"));
 	dispatch.free_fn = reinterpret_cast<PFN_mpv_free>(runtime_symbol(dispatch.library, "mpv_free"));
 	dispatch.wait_event = reinterpret_cast<PFN_mpv_wait_event>(runtime_symbol(dispatch.library, "mpv_wait_event"));
-	dispatch.set_godot_audio_callback = reinterpret_cast<PFN_mpv_godot_audio_set_callback>(runtime_symbol(dispatch.library, "mpv_godot_audio_set_callback"));
+	dispatch.set_godot_audio_sink = reinterpret_cast<PFN_mpv_godot_audio_set_sink>(runtime_symbol(dispatch.library, "mpv_godot_audio_set_sink"));
 
-	if (!dispatch.create || !dispatch.initialize || !dispatch.terminate_destroy || !dispatch.error_string || !dispatch.set_option_string || !dispatch.command || !dispatch.command_async || !dispatch.set_property_string || !dispatch.get_property || !dispatch.free_fn || !dispatch.wait_event || !dispatch.set_godot_audio_callback) {
+	if (!dispatch.create || !dispatch.initialize || !dispatch.terminate_destroy || !dispatch.error_string || !dispatch.set_option_string || !dispatch.command || !dispatch.command_async || !dispatch.set_property_string || !dispatch.get_property || !dispatch.free_fn || !dispatch.wait_event || !dispatch.set_godot_audio_sink) {
 		String missing;
 		if (!dispatch.create) {
 			missing += " mpv_create";
@@ -187,8 +187,8 @@ bool load_mpv_dispatch(String &r_error) {
 		if (!dispatch.wait_event) {
 			missing += " mpv_wait_event";
 		}
-		if (!dispatch.set_godot_audio_callback) {
-			missing += " mpv_godot_audio_set_callback";
+		if (!dispatch.set_godot_audio_sink) {
+			missing += " mpv_godot_audio_set_sink";
 		}
 		r_error = "failed to resolve required libmpv symbols from " + loaded_from + ":" + missing;
 		close_runtime(dispatch.library);
@@ -209,9 +209,9 @@ void unload_mpv_dispatch() {
 
 } // namespace
 
-void MpvCore::set_audio_callback(void *p_user_data, mpv_godot_audio_callback_fn p_callback) {
-	audio_callback_user_data = p_user_data;
-	audio_callback = p_callback;
+void MpvCore::set_audio_sink(void *p_user_data, const mpv_godot_audio_sink *p_sink) {
+	audio_sink_user_data = p_user_data;
+	audio_sink = p_sink;
 }
 
 bool MpvCore::initialize() {
@@ -240,12 +240,15 @@ bool MpvCore::initialize() {
 	dispatch.set_option_string(handle, "vo", video_output_name);
 	dispatch.set_option_string(handle, "ao", "godot");
 	dispatch.set_option_string(handle, "audio-format", "float");
+	// The sample routes two screen speakers. Let mpv downmix center/surround
+	// content instead of silently leaving those channels without consumers.
+	dispatch.set_option_string(handle, "audio-channels", "stereo");
 	dispatch.set_option_string(handle, "pause", "yes");
 
-	if (dispatch.set_godot_audio_callback(handle, audio_callback_user_data, audio_callback) < 0) {
+	if (dispatch.set_godot_audio_sink(handle, audio_sink_user_data, audio_sink) < 0) {
 		dispatch.terminate_destroy(handle);
 		handle = nullptr;
-		status = "failed to configure godot audio callback";
+		status = "failed to configure godot audio sink";
 		return false;
 	}
 

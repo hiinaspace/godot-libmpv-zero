@@ -1,0 +1,327 @@
+--- a/audio/out/ao_godot.c
++++ b/audio/out/ao_godot.c
+@@ -17,178 +17,92 @@
+  * License along with mpv.  If not, see <http://www.gnu.org/licenses/>.
+  */
+ 
+-#include <stdint.h>
+-
+-#include "mpv_talloc.h"
+ 
+ #include "ao.h"
+ #include "audio/format.h"
+-#include "common/common.h"
+-#include "common/global.h"
+ #include "common/msg.h"
+ #include "internal.h"
+ #include "mpv/godot_audio.h"
+-#include "options/m_option.h"
+-#include "osdep/threads.h"
+-#include "osdep/timer.h"
+ #include "player/client.h"
+ 
+ struct priv {
+-  mp_thread thread;
+-  mp_mutex lock;
+-  mp_cond wakeup;
+-  bool thread_created;
+-  bool shutting_down;
+-  bool started;
+-  bool paused;
+-  int chunk_samples;
+-  int buffer_samples;
+-  uint8_t *buffer;
++    const mpv_godot_audio_sink *sink;
++    void *ctx;
+ };
+ 
+-static MP_THREAD_VOID audio_thread(void *arg) {
+-  struct ao *ao = arg;
+-  struct priv *p = ao->priv;
+-  int64_t next_wakeup_ns = mp_time_ns();
+-
+-  mp_thread_set_name("ao/godot");
+-
+-  while (true) {
+-    mp_mutex_lock(&p->lock);
+-    while (!p->shutting_down && (!p->started || p->paused))
+-      mp_cond_wait(&p->wakeup, &p->lock);
+-    bool shutting_down = p->shutting_down;
+-    int chunk_samples = p->chunk_samples;
+-    mp_mutex_unlock(&p->lock);
+-
+-    if (shutting_down)
+-      break;
+-
+-    int64_t chunk_duration = MP_TIME_S_TO_NS(chunk_samples) / ao->samplerate;
+-    next_wakeup_ns += chunk_duration;
+-    int64_t end_time_ns = next_wakeup_ns + chunk_duration;
+-    void *planes[] = {p->buffer};
+-    int samples =
+-        ao_read_data(ao, planes, chunk_samples, end_time_ns, NULL, true, true);
+-
+-    mpv_godot_audio_callback_fn callback = NULL;
+-    void *user_data = NULL;
+-    mp_godot_audio_get_callback(ao->global, &user_data, &callback);
+-    if (callback && samples > 0) {
+-      mpv_godot_audio_frame frame = {
+-          .format = MPV_GODOT_AUDIO_FORMAT_F32,
+-          .samples = samples,
+-          .sample_rate = ao->samplerate,
+-          .channels = ao->channels.num,
+-          .end_time_ns = end_time_ns,
+-          .data = p->buffer,
+-          .size = (size_t)samples * ao->sstride,
+-      };
+-      callback(user_data, &frame);
++static int init(struct ao *ao)
++{
++    struct priv *p = ao->priv;
++    if (!mp_godot_audio_get_sink(ao->global, &p->ctx, &p->sink) ||
++        !p->sink->configure || !p->sink->reset || !p->sink->set_playing ||
++        !p->sink->write || !p->sink->get_state) {
++        MP_FATAL(ao, "buffered Godot audio sink not configured\n");
++        return -1;
+     }
+-
+-    int64_t now_ns = mp_time_ns();
+-    if (next_wakeup_ns > now_ns) {
+-      mp_sleep_ns(next_wakeup_ns - now_ns);
+-    } else {
+-      next_wakeup_ns = now_ns;
+-    }
+-  }
+-
+-  MP_THREAD_RETURN();
++    struct mp_chmap_sel sel = {.tmp = ao};
++    mp_chmap_sel_add_any(&sel);
++    if (!ao_chmap_sel_adjust(ao, &sel, &ao->channels))
++        return -1;
++    ao->format = AF_FORMAT_FLOAT;
++    ao->device_buffer = ao->samplerate / 10;
++    return p->sink->configure(p->ctx, ao->samplerate, ao->channels.num,
++                              ao->device_buffer);
+ }
+ 
+-static int init(struct ao *ao) {
+-  struct priv *p = ao->priv;
+-  mpv_godot_audio_callback_fn callback = NULL;
+-  void *user_data = NULL;
+-  mp_godot_audio_get_callback(ao->global, &user_data, &callback);
+-  if (!callback) {
+-    MP_FATAL(ao, "godot audio callback not configured\n");
+-    return -1;
+-  }
+-
+-  struct mp_chmap_sel sel = {.tmp = ao};
+-  mp_chmap_sel_add_any(&sel);
+-  if (!ao_chmap_sel_adjust(ao, &sel, &ao->channels))
+-    return -1;
+-
+-  ao->format = AF_FORMAT_FLOAT;
+-
+-  p->chunk_samples = MPMAX(256, ao->samplerate / 100);
+-  p->chunk_samples = MPMIN(p->chunk_samples, 2048);
+-  p->buffer_samples = p->chunk_samples * 8;
+-  ao->device_buffer = p->buffer_samples;
+-
+-  p->buffer = talloc_size(p, (size_t)p->chunk_samples * ao->channels.num *
+-                                 af_fmt_to_bytes(ao->format));
+-  if (!p->buffer)
+-    return -1;
+-
+-  mp_mutex_init(&p->lock);
+-  mp_cond_init(&p->wakeup);
+-  if (mp_thread_create(&p->thread, audio_thread, ao)) {
+-    mp_cond_destroy(&p->wakeup);
+-    mp_mutex_destroy(&p->lock);
+-    return -1;
+-  }
+-  p->thread_created = true;
+-  return 0;
++static void reset(struct ao *ao)
++{
++    struct priv *p = ao->priv;
++    p->sink->reset(p->ctx);
+ }
+ 
+-static void uninit(struct ao *ao) {
+-  struct priv *p = ao->priv;
+-  if (!p)
+-    return;
+-
+-  if (p->thread_created) {
+-    mp_mutex_lock(&p->lock);
+-    p->shutting_down = true;
+-    mp_cond_broadcast(&p->wakeup);
+-    mp_mutex_unlock(&p->lock);
+-    mp_thread_join(p->thread);
+-  }
+-
+-  mp_cond_destroy(&p->wakeup);
+-  mp_mutex_destroy(&p->lock);
++static void uninit(struct ao *ao)
++{
++    reset(ao);
+ }
+ 
+-static void reset(struct ao *ao) {
+-  struct priv *p = ao->priv;
+-  mp_mutex_lock(&p->lock);
+-  p->started = false;
+-  p->paused = false;
+-  mp_cond_broadcast(&p->wakeup);
+-  mp_mutex_unlock(&p->lock);
++static void start(struct ao *ao)
++{
++    struct priv *p = ao->priv;
++    p->sink->set_playing(p->ctx, 1);
+ }
+ 
+-static bool set_pause(struct ao *ao, bool paused) {
+-  struct priv *p = ao->priv;
+-  mp_mutex_lock(&p->lock);
+-  p->paused = paused;
+-  mp_cond_broadcast(&p->wakeup);
+-  mp_mutex_unlock(&p->lock);
+-  return true;
++static bool set_pause(struct ao *ao, bool paused)
++{
++    struct priv *p = ao->priv;
++    p->sink->set_playing(p->ctx, !paused);
++    return true;
+ }
+ 
+-static void start(struct ao *ao) {
+-  struct priv *p = ao->priv;
+-  mp_mutex_lock(&p->lock);
+-  p->started = true;
+-  p->paused = false;
+-  mp_cond_broadcast(&p->wakeup);
+-  mp_mutex_unlock(&p->lock);
++static bool audio_write(struct ao *ao, void **data, int samples)
++{
++    struct priv *p = ao->priv;
++    return p->sink->write(p->ctx, data[0], samples) == 0;
+ }
+ 
++static void get_state(struct ao *ao, struct mp_pcm_state *state)
++{
++    struct priv *p = ao->priv;
++    mpv_godot_audio_sink_state s = {0};
++    p->sink->get_state(p->ctx, &s);
++    *state = (struct mp_pcm_state) {
++        .free_samples = s.free_frames,
++        .queued_samples = s.queued_frames,
++        .delay = s.delay_seconds,
++        .playing = s.playing,
++    };
++}
++
++// mpv serializes these callbacks and drives refill from the sink's actual
++// queue depth. There is no second timer pretending to be an audio device.
+ const struct ao_driver audio_out_godot = {
+-    .description = "Godot audio callback",
++    .description = "Godot buffered audio sink",
+     .name = "godot",
+     .init = init,
+     .uninit = uninit,
+     .reset = reset,
+     .set_pause = set_pause,
+     .start = start,
++    .write = audio_write,
++    .get_state = get_state,
+     .priv_size = sizeof(struct priv),
+-    .options = (const struct m_option[]){{0}},
+-    .options_prefix = "godot",
+ };
+--- a/player/client.h
++++ b/player/client.h
+@@ -62,4 +62,10 @@
+ bool mp_godot_audio_get_callback(struct mpv_global *g, void **out_user_data,
+                                  mpv_godot_audio_callback_fn *out_fn);
+ 
++struct mpv_godot_audio_sink;
++MPV_EXPORT int mpv_godot_audio_set_sink(struct mpv_handle *ctx, void *user_data,
++                                      const struct mpv_godot_audio_sink *sink);
++bool mp_godot_audio_get_sink(struct mpv_global *g, void **user_data,
++                            const struct mpv_godot_audio_sink **sink);
++
+ #endif
+--- a/player/client.c
++++ b/player/client.c
+@@ -80,6 +80,8 @@
+     struct mp_custom_protocol *custom_protocols;
+     int num_custom_protocols;
+ 
++    void *godot_audio_sink_user_data;
++    const struct mpv_godot_audio_sink *godot_audio_sink;
+     void *godot_audio_user_data;
+     mpv_godot_audio_callback_fn godot_audio_callback;
+ 
+@@ -2274,3 +2276,28 @@
+     mp_mutex_unlock(&clients->lock);
+     return found;
+ }
++
++int mpv_godot_audio_set_sink(mpv_handle *ctx, void *user_data,
++                           const struct mpv_godot_audio_sink *sink)
++{
++    // The sink is immutable once initialization starts.
++    if (ctx->mpctx->initialized)
++        return MPV_ERROR_INVALID_PARAMETER;
++    struct mp_client_api *clients = ctx->clients;
++    mp_mutex_lock(&clients->lock);
++    clients->godot_audio_sink_user_data = user_data;
++    clients->godot_audio_sink = sink;
++    mp_mutex_unlock(&clients->lock);
++    return 0;
++}
++
++bool mp_godot_audio_get_sink(struct mpv_global *g, void **user_data,
++                           const struct mpv_godot_audio_sink **sink)
++{
++    struct mp_client_api *clients = g->client_api;
++    mp_mutex_lock(&clients->lock);
++    *user_data = clients->godot_audio_sink_user_data;
++    *sink = clients->godot_audio_sink;
++    mp_mutex_unlock(&clients->lock);
++    return *sink != NULL;
++}
+--- a/include/mpv/godot_audio.h
++++ b/include/mpv/godot_audio.h
+@@ -73,6 +73,34 @@
+ MPV_EXPORT int mpv_godot_audio_set_callback(mpv_handle *ctx, void *user_data,
+                                             mpv_godot_audio_callback_fn cb);
+ 
++/** Buffered sink API (experimental). Install before mpv_initialize().
++ * The vtable and user_data must remain alive until mpv_terminate_destroy()
++ * returns. Callbacks are serialized by mpv's AO lock, on mpv-owned threads;
++ * they must not call libmpv APIs. The consumer may read its buffer concurrently.
++ * No callback may retain the write() data pointer after returning.
++ */
++typedef struct mpv_godot_audio_sink_state {
++    int free_frames;
++    int queued_frames;
++    double delay_seconds; // Queued PCM plus estimated downstream output latency.
++    int playing;         // Clear on starvation/drain, including at EOF.
++} mpv_godot_audio_sink_state;
++
++typedef struct mpv_godot_audio_sink {
++    // Return 0 on success. Configure bounded interleaved float32 storage.
++    int (*configure)(void *ctx, int sample_rate, int channels, int capacity_frames);
++    // Stop consumption and discard all queued PCM, including on seeks.
++    void (*reset)(void *ctx);
++    // Pause preserves queued PCM. write() never starts consumption itself.
++    void (*set_playing)(void *ctx, int playing);
++    // Return 0 on success; frames never exceeds get_state().free_frames.
++    int (*write)(void *ctx, const float *data, int frames);
++    void (*get_state)(void *ctx, mpv_godot_audio_sink_state *state);
++} mpv_godot_audio_sink;
++
++MPV_EXPORT int mpv_godot_audio_set_sink(mpv_handle *ctx, void *user_data,
++                                      const mpv_godot_audio_sink *sink);
++
+ #ifdef __cplusplus
+ }
+ #endif

@@ -3,10 +3,10 @@
 #include "channel_audio_stream.h"
 #include "mini_mpv_client.h"
 
+#include <chrono>
 #include <cstdint>
-#include <deque>
-#include <mutex>
 #include <memory>
+#include <mutex>
 #include <vector>
 
 #include <godot_cpp/classes/audio_frame.hpp>
@@ -19,55 +19,61 @@ public:
 	struct Diagnostics {
 		int sample_rate = 48000;
 		int channel_count = 0;
+		int capacity_frames = 0;
 		int max_queued_frames = 0;
 		int total_queued_frames = 0;
 		int underrun_count = 0;
+		uint64_t generation = 0;
+		double estimated_delay_seconds = 0;
 		std::vector<int> queued_frames_per_channel;
-		std::vector<int> pull_calls_per_channel;
-		std::vector<int> pulled_frames_per_channel;
-		std::vector<int> consumed_frames_per_channel;
+		std::vector<int64_t> pull_calls_per_channel;
+		std::vector<int64_t> pulled_frames_per_channel;
+		std::vector<int64_t> consumed_frames_per_channel;
 		std::vector<bool> playing_per_channel;
 	};
 
-	void reset();
-	void clear_queued_audio();
-	void set_source_active(bool p_active);
-	void set_playback_active(bool p_active);
-	void set_channel_playing(int p_channel_index, bool p_playing);
-	void note_channel_pull(int p_channel_index, int p_frame_count);
-	void enqueue_interleaved_f32(const float *p_samples, int p_frame_count, int p_channel_count, int p_sample_rate);
-	int pull_channel_frames(int p_channel_index, godot::AudioFrame *p_buffer, int p_frame_count);
+	void reset(); // Only after mpv has stopped/joined its AO.
+	void set_output_latency(double p_seconds);
+	void set_channel_playing(int p_channel, uint64_t p_generation, bool p_playing);
+	int pull_channel_frames(int p_channel, uint64_t p_generation, godot::AudioFrame *p_buffer, int p_frames);
 	bool consume_configuration_changed();
 	int get_audio_channel_count() const;
 	int get_sample_rate() const;
-	godot::Ref<godot::AudioStream> get_audio_stream_for_channel(int p_channel_index) const;
+	godot::Ref<godot::AudioStream> get_audio_stream_for_channel(int p_channel);
 	Diagnostics get_diagnostics() const;
-
-	static void mpv_audio_callback(void *p_user_data, const mpv_godot_audio_frame *p_frame);
+	static const mpv_godot_audio_sink sink;
 
 private:
+	using Clock = std::chrono::steady_clock;
 	struct ChannelState {
 		godot::Ref<godot::ChannelAudioStream> stream;
-		std::deque<float> queued_samples;
-		bool playing = false;
-		int pull_calls = 0;
-		int pulled_frames = 0;
-		int consumed_frames = 0;
+		std::vector<float> samples;
+		size_t read_index = 0;
+		int queued = 0;
+		int consumers = 0;
+		int64_t pull_calls = 0;
+		int64_t pulled_frames = 0;
+		int64_t consumed_frames = 0;
+		Clock::time_point output_end{};
 	};
 
-	void reconfigure_locked(int p_channel_count, int p_sample_rate);
-	void update_playback_active_locked();
-	bool is_primed_locked() const;
+	static int configure_sink(void *p_ctx, int p_rate, int p_channels, int p_capacity);
+	static void reset_sink(void *p_ctx);
+	static void play_sink(void *p_ctx, int p_playing);
+	static int write_sink(void *p_ctx, const float *p_data, int p_frames);
+	static void state_sink(void *p_ctx, mpv_godot_audio_sink_state *p_state);
+	void clear_locked();
+	mpv_godot_audio_sink_state state_locked() const;
 
 	mutable std::mutex mutex;
 	std::vector<ChannelState> channels;
 	int sample_rate = 48000;
+	int capacity = 0;
+	uint64_t generation = 0;
 	bool configuration_changed = false;
 	int underrun_count = 0;
-	bool source_active = false;
-	bool playback_active = false;
-	bool priming_complete = false;
-	int startup_buffer_frames = 4800;
+	bool sink_playing = false;
+	double output_latency = 0;
 };
 
 } // namespace libmpv_zero

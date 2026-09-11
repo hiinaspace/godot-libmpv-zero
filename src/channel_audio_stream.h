@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <cstdint>
 #include <memory>
 
 #include <godot_cpp/classes/audio_frame.hpp>
@@ -22,6 +23,7 @@ class ChannelAudioStream : public AudioStream {
 private:
 	std::weak_ptr<libmpv_zero::AudioBridge> bridge;
 	int channel_index = -1;
+	uint64_t generation = 0;
 
 protected:
 	static void _bind_methods();
@@ -31,7 +33,7 @@ public:
 	~ChannelAudioStream() override = default;
 
 	Ref<AudioStreamPlayback> _instantiate_playback() const override;
-	void configure(const std::weak_ptr<libmpv_zero::AudioBridge> &p_bridge, int p_channel_index);
+	void configure(const std::weak_ptr<libmpv_zero::AudioBridge> &p_bridge, int p_channel_index, uint64_t p_generation);
 	int get_channel_index() const;
 	String _get_stream_name() const override;
 	double _get_length() const override;
@@ -44,6 +46,7 @@ class ChannelAudioStreamPlayback : public AudioStreamPlaybackResampled {
 private:
 	std::shared_ptr<libmpv_zero::AudioBridge> bridge;
 	int channel_index = -1;
+	uint64_t generation = 0;
 	std::atomic<bool> is_active{ false };
 
 protected:
@@ -51,9 +54,9 @@ protected:
 
 public:
 	ChannelAudioStreamPlayback() = default;
-	~ChannelAudioStreamPlayback() override = default;
+	~ChannelAudioStreamPlayback() override;
 
-	void configure(const std::shared_ptr<libmpv_zero::AudioBridge> &p_bridge, int p_channel_index);
+	void configure(const std::shared_ptr<libmpv_zero::AudioBridge> &p_bridge, int p_channel_index, uint64_t p_generation);
 	int32_t _mix_resampled(AudioFrame *p_buffer, int32_t p_frames) override;
 	float _get_stream_sampling_rate() const override;
 	void _start(double p_from_pos) override;

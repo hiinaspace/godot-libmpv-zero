@@ -1,6 +1,6 @@
 {
   "enabled_classes": [
-    "AudioFrame", "AudioStream", "AudioStreamPlayback", "AudioStreamPlaybackResampled",
+    "AudioServer", "AudioFrame", "AudioStream", "AudioStreamPlayback", "AudioStreamPlaybackResampled",
     "FileAccess", "ProjectSettings", "OS", "Node", "RenderingDevice",
     "RenderingServer", "RDTextureFormat", "RDTextureView", "Texture2D", "Texture2DRD", "ImageTexture"
   ]

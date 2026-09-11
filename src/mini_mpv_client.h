@@ -16,4 +16,4 @@ using PFN_mpv_get_property = decltype(&mpv_get_property);
 using PFN_mpv_get_property_string = decltype(&mpv_get_property_string);
 using PFN_mpv_free = decltype(&mpv_free);
 using PFN_mpv_wait_event = decltype(&mpv_wait_event);
-using PFN_mpv_godot_audio_set_callback = decltype(&mpv_godot_audio_set_callback);
+using PFN_mpv_godot_audio_set_sink = decltype(&mpv_godot_audio_set_sink);

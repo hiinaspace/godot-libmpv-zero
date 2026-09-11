@@ -38,7 +38,7 @@ public:
 	void stop();
 	void seek(double p_seconds);
 	void set_video_output_mode(VideoOutputMode p_mode);
-	void set_audio_callback(void *p_user_data, mpv_godot_audio_callback_fn p_callback);
+	void set_audio_sink(void *p_user_data, const mpv_godot_audio_sink *p_sink);
 	bool initialize();
 	void shutdown();
 	PollResult poll();
@@ -74,8 +74,8 @@ private:
 	int video_width = 0;
 	int video_height = 0;
 	VideoOutputMode video_output_mode = VideoOutputMode::LIBMPV;
-	void *audio_callback_user_data = nullptr;
-	mpv_godot_audio_callback_fn audio_callback = nullptr;
+	void *audio_sink_user_data = nullptr;
+	const mpv_godot_audio_sink *audio_sink = nullptr;
 };
 
 } // namespace libmpv_zero

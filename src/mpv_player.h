@@ -53,6 +53,7 @@ private:
 	bool autoplay = false;
 	bool paused_requested = false;
 	double last_known_duration = 0.0;
+	double latency_refresh_remaining = 0.0;
 	int last_video_width = 0;
 	int last_video_height = 0;
 	NodePath left_audio_target_path;
