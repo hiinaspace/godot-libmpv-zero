@@ -243,6 +243,9 @@ bool MpvCore::initialize() {
 	// The sample routes two screen speakers. Let mpv downmix center/surround
 	// content instead of silently leaving those channels without consumers.
 	dispatch.set_option_string(handle, "audio-channels", "stereo");
+	// The render thread never waits for mpv's target time. Request frames when
+	// due instead of immediately publishing frames rendered ahead of audio.
+	dispatch.set_option_string(handle, "video-timing-offset", "0");
 	dispatch.set_option_string(handle, "pause", "yes");
 
 	if (dispatch.set_godot_audio_sink(handle, audio_sink_user_data, audio_sink) < 0) {
