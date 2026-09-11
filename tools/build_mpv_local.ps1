@@ -36,6 +36,7 @@ meson setup '__BUILD_DIR__' \
   --prefix='__STAGE_DIR__'
 meson compile -C '__BUILD_DIR__'
 meson install -C '__BUILD_DIR__'
+cp include/mpv/godot_audio.h include/mpv/render_vk.h '__STAGE_DIR__/include/mpv/'
 ldd '__STAGE_DIR__/bin/libmpv-2.dll' | awk '/=> \/clang64\/bin\// { print $3 }' | sort -u > '__STAGE_DIR__/bin/runtime_deps.txt'
 '@
 $script = $script.Replace("__MPV_SOURCE__", $mpvSourceUnix).Replace("__BUILD_DIR__", $buildDirUnix).Replace("__STAGE_DIR__", $stageDirUnix)
