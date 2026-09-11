@@ -48,7 +48,10 @@ add_library(${LIBNAME} SHARED)
 
 # Compile against the exact fork API instead of maintaining handwritten ABI
 # declarations. The custom audio and Vulkan headers are required.
-find_path(MPV_INCLUDE_DIR mpv/godot_audio.h HINTS "${MPV_DIR}/include" REQUIRED)
+set(MPV_INCLUDE_DIR "${MPV_DIR}/include")
+if(NOT EXISTS "${MPV_INCLUDE_DIR}/mpv/godot_audio.h" OR NOT EXISTS "${MPV_INCLUDE_DIR}/mpv/render_vk.h")
+    message(FATAL_ERROR "MPV_DIR must contain the fork's audio and Vulkan API headers")
+endif()
 find_path(VULKAN_INCLUDE_DIR vulkan/vulkan.h HINTS "$ENV{VULKAN_SDK}/Include" REQUIRED)
 target_include_directories(${LIBNAME} PRIVATE "${MPV_INCLUDE_DIR}" "${VULKAN_INCLUDE_DIR}")
 
