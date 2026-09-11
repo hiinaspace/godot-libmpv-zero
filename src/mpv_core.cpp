@@ -19,6 +19,14 @@ namespace {
 
 using Clock = std::chrono::steady_clock;
 
+enum ObservedProperty : uint64_t { TIME_POS = 1, DURATION, WIDTH, HEIGHT, PAUSED, EOF_REACHED };
+struct PropertyObservation { ObservedProperty id; const char *name; mpv_format format; };
+constexpr PropertyObservation observed_properties[] = {
+	{TIME_POS, "time-pos", MPV_FORMAT_DOUBLE}, {DURATION, "duration", MPV_FORMAT_DOUBLE},
+	{WIDTH, "width", MPV_FORMAT_INT64}, {HEIGHT, "height", MPV_FORMAT_INT64},
+	{PAUSED, "pause", MPV_FORMAT_FLAG}, {EOF_REACHED, "eof-reached", MPV_FORMAT_FLAG},
+};
+
 struct MpvDispatch {
 	void *library = nullptr;
 	PFN_mpv_create create = nullptr;
@@ -26,14 +34,11 @@ struct MpvDispatch {
 	PFN_mpv_terminate_destroy terminate_destroy = nullptr;
 	PFN_mpv_error_string error_string = nullptr;
 	PFN_mpv_set_option_string set_option_string = nullptr;
-	PFN_mpv_command command = nullptr;
 	PFN_mpv_command_async command_async = nullptr;
-	PFN_mpv_set_property_string set_property_string = nullptr;
 	PFN_mpv_set_property_async set_property_async = nullptr;
-	PFN_mpv_get_property get_property = nullptr;
-	PFN_mpv_get_property_string get_property_string = nullptr;
-	PFN_mpv_free free_fn = nullptr;
 	PFN_mpv_wait_event wait_event = nullptr;
+	PFN_mpv_observe_property observe_property = nullptr;
+	PFN_mpv_request_log_messages request_log_messages = nullptr;
 	PFN_mpv_godot_audio_set_sink set_godot_audio_sink = nullptr;
 };
 
@@ -57,51 +62,6 @@ String format_mpv_error(int p_error) {
 	}
 
 	return vformat("mpv error %d", p_error);
-}
-
-bool get_mpv_double_property(mpv_handle *p_handle, const char *p_name, double &r_value) {
-	MpvDispatch &dispatch = get_dispatch();
-	if (!dispatch.get_property || !p_handle) {
-		return false;
-	}
-
-	double value = 0.0;
-	if (dispatch.get_property(p_handle, p_name, MPV_FORMAT_DOUBLE, &value) >= 0) {
-		r_value = value;
-		return true;
-	}
-
-	return false;
-}
-
-bool get_mpv_flag_property(mpv_handle *p_handle, const char *p_name, bool &r_value) {
-	MpvDispatch &dispatch = get_dispatch();
-	if (!dispatch.get_property || !p_handle) {
-		return false;
-	}
-
-	int flag = 0;
-	if (dispatch.get_property(p_handle, p_name, MPV_FORMAT_FLAG, &flag) >= 0) {
-		r_value = flag != 0;
-		return true;
-	}
-
-	return false;
-}
-
-bool get_mpv_int64_property(mpv_handle *p_handle, const char *p_name, int64_t &r_value) {
-	MpvDispatch &dispatch = get_dispatch();
-	if (!dispatch.get_property || !p_handle) {
-		return false;
-	}
-
-	int64_t value = 0;
-	if (dispatch.get_property(p_handle, p_name, MPV_FORMAT_INT64, &value) >= 0) {
-		r_value = value;
-		return true;
-	}
-
-	return false;
 }
 
 bool is_load_trace_enabled() {
@@ -142,18 +102,24 @@ bool load_mpv_dispatch(String &r_error) {
 	dispatch.terminate_destroy = reinterpret_cast<PFN_mpv_terminate_destroy>(runtime_symbol(dispatch.library, "mpv_terminate_destroy"));
 	dispatch.error_string = reinterpret_cast<PFN_mpv_error_string>(runtime_symbol(dispatch.library, "mpv_error_string"));
 	dispatch.set_option_string = reinterpret_cast<PFN_mpv_set_option_string>(runtime_symbol(dispatch.library, "mpv_set_option_string"));
-	dispatch.command = reinterpret_cast<PFN_mpv_command>(runtime_symbol(dispatch.library, "mpv_command"));
 	dispatch.command_async = reinterpret_cast<PFN_mpv_command_async>(runtime_symbol(dispatch.library, "mpv_command_async"));
-	dispatch.set_property_string = reinterpret_cast<PFN_mpv_set_property_string>(runtime_symbol(dispatch.library, "mpv_set_property_string"));
 	dispatch.set_property_async = reinterpret_cast<PFN_mpv_set_property_async>(runtime_symbol(dispatch.library, "mpv_set_property_async"));
-	dispatch.get_property = reinterpret_cast<PFN_mpv_get_property>(runtime_symbol(dispatch.library, "mpv_get_property"));
-	dispatch.get_property_string = reinterpret_cast<PFN_mpv_get_property_string>(runtime_symbol(dispatch.library, "mpv_get_property_string"));
-	dispatch.free_fn = reinterpret_cast<PFN_mpv_free>(runtime_symbol(dispatch.library, "mpv_free"));
 	dispatch.wait_event = reinterpret_cast<PFN_mpv_wait_event>(runtime_symbol(dispatch.library, "mpv_wait_event"));
+	dispatch.observe_property = reinterpret_cast<PFN_mpv_observe_property>(runtime_symbol(dispatch.library, "mpv_observe_property"));
+	dispatch.request_log_messages = reinterpret_cast<PFN_mpv_request_log_messages>(runtime_symbol(dispatch.library, "mpv_request_log_messages"));
 	dispatch.set_godot_audio_sink = reinterpret_cast<PFN_mpv_godot_audio_set_sink>(runtime_symbol(dispatch.library, "mpv_godot_audio_set_sink"));
 
-	if (!dispatch.create || !dispatch.initialize || !dispatch.terminate_destroy || !dispatch.error_string || !dispatch.set_option_string || !dispatch.command || !dispatch.command_async || !dispatch.set_property_string || !dispatch.get_property || !dispatch.free_fn || !dispatch.wait_event || !dispatch.set_godot_audio_sink) {
+	if (!dispatch.create || !dispatch.initialize || !dispatch.terminate_destroy || !dispatch.error_string || !dispatch.set_option_string || !dispatch.command_async || !dispatch.wait_event || !dispatch.set_godot_audio_sink || !dispatch.set_property_async || !dispatch.observe_property || !dispatch.request_log_messages) {
 		String missing;
+		if (!dispatch.set_property_async) {
+			missing += " mpv_set_property_async";
+		}
+		if (!dispatch.observe_property) {
+			missing += " mpv_observe_property";
+		}
+		if (!dispatch.request_log_messages) {
+			missing += " mpv_request_log_messages";
+		}
 		if (!dispatch.create) {
 			missing += " mpv_create";
 		}
@@ -169,20 +135,8 @@ bool load_mpv_dispatch(String &r_error) {
 		if (!dispatch.set_option_string) {
 			missing += " mpv_set_option_string";
 		}
-		if (!dispatch.command) {
-			missing += " mpv_command";
-		}
 		if (!dispatch.command_async) {
 			missing += " mpv_command_async";
-		}
-		if (!dispatch.set_property_string) {
-			missing += " mpv_set_property_string";
-		}
-		if (!dispatch.get_property) {
-			missing += " mpv_get_property";
-		}
-		if (!dispatch.free_fn) {
-			missing += " mpv_free";
 		}
 		if (!dispatch.wait_event) {
 			missing += " mpv_wait_event";
@@ -263,13 +217,24 @@ bool MpvCore::initialize() {
 		return false;
 	}
 
+	// Synchronous property reads can block the same thread that must service
+	// rendering. Observations arrive on the nonblocking client event queue.
+	for (const auto &property : observed_properties) {
+		if (dispatch.observe_property(handle, property.id, property.name, property.format) < 0) {
+			dispatch.terminate_destroy(handle);
+			handle = nullptr;
+			status = "failed to observe mpv playback properties";
+			return false;
+		}
+	}
+	dispatch.request_log_messages(handle, "warn");
+	observed_paused = true;
 	initialized = true;
 	get_dispatch_ref_count() += 1;
 	file_loaded = false;
 	eof_reached = false;
 	seeking = false;
 	loading = false;
-	awaiting_playback_restart = false;
 	status = "libmpv initialized";
 	return true;
 }
@@ -289,7 +254,6 @@ void MpvCore::shutdown() {
 	eof_reached = false;
 	seeking = false;
 	loading = false;
-	awaiting_playback_restart = false;
 	loaded_path = "";
 	time_pos = 0.0;
 	duration = 0.0;
@@ -317,7 +281,6 @@ void MpvCore::load_file(const String &p_path) {
 	eof_reached = false;
 	seeking = false;
 	loading = true;
-	awaiting_playback_restart = false;
 	status = "loading file";
 
 	CharString utf8_path = p_path.utf8();
@@ -342,9 +305,7 @@ void MpvCore::play() {
 	}
 
 	int pause_flag = 0;
-	const int result = get_dispatch().set_property_async
-			? get_dispatch().set_property_async(handle, 0, "pause", MPV_FORMAT_FLAG, &pause_flag)
-			: get_dispatch().set_property_string(handle, "pause", "no");
+	const int result = get_dispatch().set_property_async(handle, 0, "pause", MPV_FORMAT_FLAG, &pause_flag);
 	if (result < 0) {
 		status = "play failed: " + format_mpv_error(result);
 		return;
@@ -364,9 +325,7 @@ void MpvCore::pause() {
 
 	if (playback_state == PlaybackState::PLAYING) {
 		int pause_flag = 1;
-		const int result = get_dispatch().set_property_async
-				? get_dispatch().set_property_async(handle, 0, "pause", MPV_FORMAT_FLAG, &pause_flag)
-				: get_dispatch().set_property_string(handle, "pause", "yes");
+		const int result = get_dispatch().set_property_async(handle, 0, "pause", MPV_FORMAT_FLAG, &pause_flag);
 		if (result < 0) {
 			status = "pause failed: " + format_mpv_error(result);
 			return;
@@ -391,7 +350,6 @@ void MpvCore::stop() {
 	eof_reached = false;
 	seeking = false;
 	loading = false;
-	awaiting_playback_restart = false;
 	status = "stop issued";
 }
 
@@ -437,6 +395,62 @@ MpvCore::PollResult MpvCore::poll() {
 		}
 
 		switch (event->event_id) {
+			case MPV_EVENT_PROPERTY_CHANGE: {
+				const auto *property = static_cast<const mpv_event_property *>(event->data);
+				if (!property || !property->data) break;
+				switch (event->reply_userdata) {
+					case TIME_POS:
+						if (property->format == MPV_FORMAT_DOUBLE) {
+							const double value = *static_cast<double *>(property->data);
+							result.position_changed |= time_pos != value;
+							time_pos = value;
+						}
+						break;
+					case DURATION:
+						if (property->format == MPV_FORMAT_DOUBLE) duration = *static_cast<double *>(property->data);
+						break;
+					case WIDTH:
+					case HEIGHT:
+						if (property->format == MPV_FORMAT_INT64) {
+							int &size = event->reply_userdata == WIDTH ? video_width : video_height;
+							const int value = int(*static_cast<int64_t *>(property->data));
+							result.video_reconfigured |= size != value;
+							size = value;
+						}
+						break;
+					case PAUSED:
+						if (property->format == MPV_FORMAT_FLAG) observed_paused = *static_cast<int *>(property->data) != 0;
+						break;
+					case EOF_REACHED:
+						if (property->format == MPV_FORMAT_FLAG) {
+							const bool value = *static_cast<int *>(property->data) != 0;
+							result.eof_reached |= value && !eof_reached;
+							eof_reached = value;
+						}
+						break;
+				}
+			} break;
+			case MPV_EVENT_LOG_MESSAGE: {
+				const auto *message = static_cast<const mpv_event_log_message *>(event->data);
+				if (message) {
+					const String text = "mpv [" + String(message->prefix) + "]: " + String(message->text).strip_edges();
+					if (message->log_level <= MPV_LOG_LEVEL_ERROR) {
+						status = text;
+						result.failed = true;
+						result.status = status;
+					} else {
+						UtilityFunctions::push_warning(text);
+					}
+				}
+			} break;
+			case MPV_EVENT_COMMAND_REPLY:
+			case MPV_EVENT_SET_PROPERTY_REPLY:
+				if (event->error < 0) {
+					status = "mpv command failed: " + format_mpv_error(event->error);
+					result.failed = true;
+					result.status = status;
+				}
+				break;
 			case MPV_EVENT_START_FILE:
 				loading = true;
 				status = "starting file";
@@ -447,30 +461,32 @@ MpvCore::PollResult MpvCore::poll() {
 				eof_reached = false;
 				seeking = false;
 				loading = false;
-				awaiting_playback_restart = true;
 				status = "file loaded";
 				trace_load_log("event file_loaded");
 				result.file_loaded = true;
 				break;
 			case MPV_EVENT_END_FILE: {
+				const mpv_event_end_file *end_file = static_cast<const mpv_event_end_file *>(event->data);
+				const bool ended_at_eof = end_file && end_file->reason == MPV_END_FILE_REASON_EOF;
 				playback_state = PlaybackState::STOPPED;
 				file_loaded = false;
-				eof_reached = true;
+				eof_reached = ended_at_eof;
 				seeking = false;
-				awaiting_playback_restart = false;
 				time_pos = 0.0;
 				video_width = 0;
 				video_height = 0;
-				const mpv_event_end_file *end_file = static_cast<const mpv_event_end_file *>(event->data);
 				if (end_file && end_file->reason == MPV_END_FILE_REASON_ERROR) {
 					loading = false;
 					status = "playback ended with error: " + format_mpv_error(end_file->error);
 					result.failed = true;
+					result.status = status;
 				} else {
-					status = "playback finished";
+					status = ended_at_eof ? "playback finished" : "playback stopped";
 				}
 				trace_load_log("event end_file");
-				result.playback_finished = true;
+				// Replacing or stopping a file is not natural completion. In
+				// keep-open mode, eof-reached supplies the completion notification.
+				result.playback_finished = ended_at_eof;
 			} break;
 			case MPV_EVENT_SEEK:
 				seeking = true;
@@ -478,7 +494,6 @@ MpvCore::PollResult MpvCore::poll() {
 				break;
 			case MPV_EVENT_PLAYBACK_RESTART:
 				seeking = false;
-				awaiting_playback_restart = false;
 				status = "playback restarted";
 				result.playback_restarted = true;
 				break;
@@ -491,6 +506,7 @@ MpvCore::PollResult MpvCore::poll() {
 			case MPV_EVENT_QUEUE_OVERFLOW:
 				status = "mpv event queue overflow";
 				result.failed = true;
+				result.status = status;
 				break;
 			case MPV_EVENT_SHUTDOWN:
 				status = "mpv shutdown";
@@ -502,61 +518,16 @@ MpvCore::PollResult MpvCore::poll() {
 		}
 	}
 
-	if (seeking) {
+	const PlaybackState new_state = file_loaded && !eof_reached
+		? (observed_paused ? PlaybackState::PAUSED : PlaybackState::PLAYING) : PlaybackState::STOPPED;
+	if (new_state != playback_state) {
+		playback_state = new_state;
+		result.playback_state_changed = true;
+	}
+
+	if (!result.failed) {
 		result.status = status;
-		return result;
 	}
-
-	if (loading && !file_loaded) {
-		result.status = status;
-		return result;
-	}
-
-	if (awaiting_playback_restart) {
-		result.status = status;
-		return result;
-	}
-
-	double new_time_pos = time_pos;
-	if (get_mpv_double_property(handle, "time-pos", new_time_pos) && new_time_pos != time_pos) {
-		time_pos = new_time_pos;
-		result.position_changed = true;
-	}
-
-	double new_duration = duration;
-	if (get_mpv_double_property(handle, "duration", new_duration)) {
-		duration = new_duration;
-	}
-
-	int64_t new_width = video_width;
-	if (get_mpv_int64_property(handle, "width", new_width)) {
-		video_width = static_cast<int>(new_width);
-	}
-
-	int64_t new_height = video_height;
-	if (get_mpv_int64_property(handle, "height", new_height)) {
-		video_height = static_cast<int>(new_height);
-	}
-
-	bool paused = playback_state == PlaybackState::PAUSED;
-	if (get_mpv_flag_property(handle, "pause", paused)) {
-		const PlaybackState new_state = file_loaded ? (paused ? PlaybackState::PAUSED : PlaybackState::PLAYING) : PlaybackState::STOPPED;
-		if (new_state != playback_state) {
-			playback_state = new_state;
-			result.playback_state_changed = true;
-		}
-	}
-
-	bool new_eof_reached = eof_reached;
-	if (get_mpv_flag_property(handle, "eof-reached", new_eof_reached) && new_eof_reached != eof_reached) {
-		eof_reached = new_eof_reached;
-		result.eof_reached = eof_reached;
-		if (eof_reached) {
-			status = "playback finished";
-		}
-	}
-
-	result.status = status;
 	return result;
 }
 

@@ -68,9 +68,9 @@ private:
 	PlaybackState playback_state = PlaybackState::STOPPED;
 	bool file_loaded = false;
 	bool eof_reached = false;
+	bool observed_paused = true;
 	bool seeking = false;
 	bool loading = false;
-	bool awaiting_playback_restart = false;
 	int video_width = 0;
 	int video_height = 0;
 	VideoOutputMode video_output_mode = VideoOutputMode::LIBMPV;

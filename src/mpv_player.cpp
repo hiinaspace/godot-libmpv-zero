@@ -421,7 +421,8 @@ void MPVPlayer::_sync_mpv_state() {
 	if (mpv_core->is_loading()) {
 		trace_load_log("sync: loading active");
 	}
-	if (video_output_backend && !transitioning_now) {
+	// mpv needs render updates to complete load/seek/restart transitions too.
+	if (video_output_backend) {
 		const Clock::time_point step_start = Clock::now();
 		video_output_backend->update();
 		const int64_t duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - step_start).count();
