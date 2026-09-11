@@ -1,0 +1,59 @@
+--- a/servers/rendering/rendering_device.h
++++ b/servers/rendering/rendering_device.h
+@@ -476,6 +476,7 @@
+ #ifndef DISABLE_DEPRECATED
+ 	uint64_t texture_get_native_handle(RID p_texture);
+ #endif
++	Error texture_prepare_for_external_write(RID p_texture);
+ 
+ 	Error texture_copy(RID p_from_texture, RID p_to_texture, const Vector3 &p_from, const Vector3 &p_to, const Vector3 &p_size, uint32_t p_src_mipmap, uint32_t p_dst_mipmap, uint32_t p_src_layer, uint32_t p_dst_layer);
+ 	Error texture_clear(RID p_texture, const Color &p_color, uint32_t p_base_mipmap, uint32_t p_mipmaps, uint32_t p_base_layer, uint32_t p_layers);
+--- a/servers/rendering/rendering_device.cpp
++++ b/servers/rendering/rendering_device.cpp
+@@ -2948,6 +2948,26 @@
+ 	Texture *tex = texture_owner.get_or_null(p_texture);
+ 	ERR_FAIL_NULL_V(tex, Size2i());
+ 	return Size2i(tex->width, tex->height);
++}
++
++// Synchronous prototype handoff for a native Vulkan color-attachment writer.
++// The caller must finish its GPU work and return ownership in COLOR_ATTACHMENT
++// layout before any further RD calls. RD then supplies the next consumer barrier.
++Error RenderingDevice::texture_prepare_for_external_write(RID p_texture) {
++	ERR_RENDER_THREAD_GUARD_V(ERR_UNAVAILABLE);
++	Texture *tex = texture_owner.get_or_null(p_texture);
++	ERR_FAIL_NULL_V(tex, ERR_INVALID_PARAMETER);
++	ERR_FAIL_COND_V(!(tex->usage_flags & TEXTURE_USAGE_COLOR_ATTACHMENT_BIT), ERR_INVALID_PARAMETER);
++	_texture_check_pending_clear(p_texture, tex);
++	_check_transfer_worker_texture(tex);
++	CallbackResource resource{ p_texture, CALLBACK_RESOURCE_TYPE_TEXTURE, CALLBACK_RESOURCE_USAGE_ATTACHMENT_COLOR_READ_WRITE };
++	Error err = driver_callback_add([](RDD *, RDD::CommandBufferID, void *) {}, nullptr,
++			VectorView<CallbackResource>(&resource, 1));
++	ERR_FAIL_COND_V(err != OK, err);
++	// Execute the transition and finish earlier uses before the external writer
++	// touches the image. This also handles first use and readback layout changes.
++	_flush_and_stall_for_all_frames();
++	return OK;
+ }
+ 
+ #ifndef DISABLE_DEPRECATED
+@@ -9072,6 +9092,7 @@
+ 	ClassDB::bind_method(D_METHOD("texture_resolve_multisample", "from_texture", "to_texture"), &RenderingDevice::texture_resolve_multisample);
+ 
+ 	ClassDB::bind_method(D_METHOD("texture_get_format", "texture"), &RenderingDevice::_texture_get_format);
++	ClassDB::bind_method(D_METHOD("texture_prepare_for_external_write", "texture"), &RenderingDevice::texture_prepare_for_external_write);
+ #ifndef DISABLE_DEPRECATED
+ 	ClassDB::bind_method(D_METHOD("texture_get_native_handle", "texture"), &RenderingDevice::texture_get_native_handle);
+ #endif
+--- a/servers/rendering/rendering_device_graph.cpp
++++ b/servers/rendering/rendering_device_graph.cpp
+@@ -1925,6 +1925,9 @@
+ 	int32_t command_index;
+ 	RecordedDriverCallbackCommand *command = static_cast<RecordedDriverCallbackCommand *>(_allocate_command(sizeof(RecordedDriverCallbackCommand), command_index));
+ 	command->type = RecordedCommand::TYPE_DRIVER_CALLBACK;
++	// Native callbacks may use any stage. An empty scope cannot synchronize
++	// their declared resource accesses on Vulkan.
++	command->self_stages = RDD::PIPELINE_STAGE_ALL_COMMANDS_BIT;
+ 	command->callback = p_callback;
+ 	command->userdata = p_userdata;
+ 	_add_command_to_graph((ResourceTracker **)p_trackers.ptr(), (ResourceUsage *)p_usages.ptr(), p_trackers.size(), command_index, command);

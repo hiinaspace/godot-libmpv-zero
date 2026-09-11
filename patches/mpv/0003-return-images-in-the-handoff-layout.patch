@@ -1,0 +1,32 @@
+--- a/video/out/vulkan/libmpv_vk.c
++++ b/video/out/vulkan/libmpv_vk.c
+@@ -145,6 +145,8 @@
+ 
+   if (!p->image_released) {
+     p->held_qf = image->queue_family;
++    p->held_layout = image->layout == VK_IMAGE_LAYOUT_UNDEFINED
++        ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL : image->layout;
+     pl_vulkan_release_ex(
+         p->vulkan->gpu,
+         pl_vulkan_release_params(.tex = p->wrapped_pltex,
+@@ -170,7 +172,6 @@
+     return;
+ 
+   p->handoff_sem.value += 1;
+-  p->held_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+   if (!pl_vulkan_hold_ex(
+           p->vulkan->gpu,
+           pl_vulkan_hold_params(.tex = p->wrapped_pltex,
+--- a/include/mpv/render_vk.h
++++ b/include/mpv/render_vk.h
+@@ -58,6 +58,10 @@
+   int depth;
+   VkFormat format;
+   VkImageUsageFlags usage;
++  // Ownership is released from and returned to this layout. UNDEFINED may
++  // discard prior contents and returns in SHADER_READ_ONLY_OPTIMAL instead.
++  // The caller must synchronize previous GPU users before render(), and make
++  // its own resource tracker account for the external color-attachment write.
+   VkImageLayout layout;
+   uint32_t queue_family;
+ } mpv_vulkan_image;

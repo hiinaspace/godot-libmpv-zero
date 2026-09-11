@@ -19,6 +19,7 @@
         patches = (old.patches or [ ]) ++ [
           ./patches/godot/0001-enable-libplacebo-device-features.patch
           ./patches/godot/0002-retire-audio-before-extension-unload.patch
+          ./patches/godot/0003-track-external-texture-writes.patch
         ];
         sconsFlags = old.sconsFlags ++ [ "use_static_cpp=false" ];
       });
@@ -34,6 +35,8 @@
         patches = (old.patches or [ ]) ++ [
           ./patches/mpv/0001-finish-vulkan-handoff-before-return.patch
           ./patches/mpv/0002-drive-audio-from-consumer-queue.patch
+          ./patches/mpv/0003-return-images-in-the-handoff-layout.patch
+          ./patches/mpv/0004-require-the-device-owners-enabled-features.patch
         ];
         doInstallCheck = false; # The fork reports its upstream version.
         postInstall = old.postInstall + ''

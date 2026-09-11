@@ -18,7 +18,6 @@ namespace libmpv_zero {
 void VkVideoOutput::_on_render_update(void *p_context) {
 	VkVideoOutput *self = static_cast<VkVideoOutput *>(p_context);
 	if (self) {
-		self->update_callback_count.fetch_add(1, std::memory_order_acq_rel);
 		self->frame_dirty.store(true, std::memory_order_relaxed);
 	}
 }
@@ -49,10 +48,23 @@ void VkVideoOutput::_render_frame_on_render_thread() {
 		render_request_in_flight.store(false, std::memory_order_release);
 		return;
 	}
+	// All render API work is serialized on Godot's render thread, including
+	// updates that are callbacks without a video frame.
+	if ((dispatch.update(render_context) & MPV_RENDER_UPDATE_FRAME) == 0) {
+		render_request_in_flight.store(false, std::memory_order_release);
+		return;
+	}
+	RenderingDevice *rd = RenderingServer::get_singleton()->get_rendering_device();
+	const Error prepare = Error(int(rd->call("texture_prepare_for_external_write", slot.handle.wrapped_texture)));
+	if (prepare != OK) {
+		last_render_result.store(MPV_ERROR_GENERIC, std::memory_order_release);
+		render_request_in_flight.store(false, std::memory_order_release);
+		return;
+	}
+	slot.image_layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
 	mpv_vulkan_image image = {};
 	int block_for_target_time = 0;
-	int skip_rendering = mpv_core && mpv_core->is_seeking() ? 1 : 0;
 	image.image = reinterpret_cast<VkImage>(slot.handle.image_handle);
 	image.width = static_cast<int>(slot.handle.width);
 	image.height = static_cast<int>(slot.handle.height);
@@ -65,14 +77,15 @@ void VkVideoOutput::_render_frame_on_render_thread() {
 
 	mpv_render_param render_params[] = {
 		{ MPV_RENDER_PARAM_BLOCK_FOR_TARGET_TIME, &block_for_target_time },
-		{ MPV_RENDER_PARAM_SKIP_RENDERING, &skip_rendering },
 		{ MPV_RENDER_PARAM_VULKAN_IMAGE, &image },
 		{ MPV_RENDER_PARAM_INVALID, nullptr },
 	};
 
 	const int render_result = dispatch.render(render_context, render_params);
 	if (render_result >= 0) {
-		slot.image_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		// mpv has completed its GPU work and returns the image in this layout.
+		// Godot's tracker now inserts the barrier for the next actual consumer.
+		slot.image_layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 		slot.published = false;
 		last_rendered_slot.store(render_slot_index, std::memory_order_release);
 	}
@@ -166,6 +179,43 @@ bool VkVideoOutput::_ensure_render_context() {
 	if (render_context) {
 		return true;
 	}
+	if (render_context_attempted || !mpv_core || !mpv_core->is_initialized()) {
+		return false;
+	}
+	if (!slots[0].handle.success && !slots[1].handle.success) {
+		return false;
+	}
+	render_context_attempted = true;
+	RenderingServer *server = RenderingServer::get_singleton();
+	// These two setup/teardown callbacks are synchronous; their owner remains
+	// alive until force_sync() returns. Frame callbacks use the weak token.
+	server->call_on_render_thread(callable_mp_static(&VkVideoOutput::_create_render_context_on_render_thread_static).bind(reinterpret_cast<uint64_t>(this)));
+	server->force_sync();
+	if (!render_context && probe_failed_callback.is_valid()) {
+		probe_failed_callback.call(status);
+	}
+	return render_context != nullptr;
+}
+
+void VkVideoOutput::_create_render_context_on_render_thread_static(uint64_t p_owner) {
+	reinterpret_cast<VkVideoOutput *>(p_owner)->_create_render_context();
+}
+
+void VkVideoOutput::_free_render_context_on_render_thread_static(uint64_t p_owner) {
+	auto *self = reinterpret_cast<VkVideoOutput *>(p_owner);
+	self->dispatch.free(self->render_context);
+	self->render_context = nullptr;
+}
+
+bool VkVideoOutput::_create_render_context() {
+	if (render_context) {
+		return true;
+	}
+	RenderingDevice *rd = RenderingServer::get_singleton()->get_rendering_device();
+	if (!rd || !rd->has_method("texture_prepare_for_external_write")) {
+		status = "this Vulkan player requires the patched Godot interop build";
+		return false;
+	}
 	const TextureSlot *init_slot = nullptr;
 	for (const TextureSlot &slot : slots) {
 		if (slot.handle.success) {
@@ -190,6 +240,20 @@ bool VkVideoOutput::_ensure_render_context() {
 	// Godot 4.7 creates a Vulkan 1.2 instance, even on a newer physical device.
 	// libplacebo must not infer a higher shader/synchronization API from the GPU.
 	init_params.max_api_version = VK_API_VERSION_1_2;
+	// The paired Godot build checked above enables these at vkCreateDevice.
+	// Advertise only that known-enabled subset, not the GPU's supported set.
+	// Keep the chain alive until the imported render context is destroyed.
+	imported_query = {};
+	imported_query.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_QUERY_RESET_FEATURES;
+	imported_query.hostQueryReset = VK_TRUE;
+	imported_timeline = {};
+	imported_timeline.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES;
+	imported_timeline.pNext = &imported_query;
+	imported_timeline.timelineSemaphore = VK_TRUE;
+	imported_features = {};
+	imported_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+	imported_features.pNext = &imported_timeline;
+	init_params.features = &imported_features;
 
 	mpv_render_param params[] = {
 		{ MPV_RENDER_PARAM_API_TYPE, const_cast<char *>(MPV_RENDER_API_TYPE_VULKAN) },
@@ -314,7 +378,8 @@ void VkVideoOutput::attach(Node *p_owner, MpvCore *p_mpv_core, const Callable &p
 }
 
 void VkVideoOutput::update() {
-	if (!render_thread_service) {
+	// Slot metadata and mpv render state must not change under a pending frame.
+	if (!render_thread_service || render_request_in_flight.load(std::memory_order_acquire)) {
 		return;
 	}
 
@@ -370,19 +435,6 @@ void VkVideoOutput::update() {
 		_publish_slot(finished_slot);
 	}
 
-	const bool forced_dirty = frame_dirty.exchange(false, std::memory_order_relaxed);
-	if (!forced_dirty) {
-		return;
-	}
-
-	uint64_t update_flags = dispatch.update(render_context);
-	if ((update_flags & MPV_RENDER_UPDATE_FRAME) == 0 && update_callback_count.load(std::memory_order_acquire) > 0) {
-		update_flags |= MPV_RENDER_UPDATE_FRAME;
-	}
-	if ((update_flags & MPV_RENDER_UPDATE_FRAME) == 0) {
-		return;
-	}
-
 	const int previous_render_result = last_render_result.load(std::memory_order_acquire);
 	if (previous_render_result < 0) {
 		last_render_result.store(0, std::memory_order_release);
@@ -390,6 +442,9 @@ void VkVideoOutput::update() {
 		if (probe_failed_callback.is_valid()) {
 			probe_failed_callback.call(status);
 		}
+		return;
+	}
+	if (!frame_dirty.exchange(false, std::memory_order_relaxed)) {
 		return;
 	}
 
@@ -425,8 +480,8 @@ void VkVideoOutput::detach() {
 		rendering_server->force_sync();
 	}
 	if (render_context && dispatch.free) {
-		dispatch.free(render_context);
-		render_context = nullptr;
+		rendering_server->call_on_render_thread(callable_mp_static(&VkVideoOutput::_free_render_context_on_render_thread_static).bind(reinterpret_cast<uint64_t>(this)));
+		rendering_server->force_sync();
 	}
 	_unload_render_dispatch();
 
@@ -461,7 +516,7 @@ void VkVideoOutput::detach() {
 	render_request_in_flight.store(false, std::memory_order_release);
 	last_render_result.store(0, std::memory_order_release);
 	last_rendered_slot.store(-1, std::memory_order_release);
-	update_callback_count.store(0, std::memory_order_release);
+	render_context_attempted = false;
 	published_slot_index = -1;
 	render_slot_index = -1;
 	status = "vulkan video backend detached";

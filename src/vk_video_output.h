@@ -52,11 +52,14 @@ private:
 
 	static void _on_render_update(void *p_context);
 	static void _render_frame_on_render_thread_static(uint64_t p_context);
+	static void _create_render_context_on_render_thread_static(uint64_t p_owner);
+	static void _free_render_context_on_render_thread_static(uint64_t p_owner);
 	void _render_frame_on_render_thread();
 	bool _load_render_dispatch();
 	void _unload_render_dispatch();
 	bool _ensure_external_textures(int p_width, int p_height, int p_target_count);
 	bool _ensure_render_context();
+	bool _create_render_context();
 	void _publish_slot(int p_slot_index);
 	void _retire_slot(TextureSlot &p_slot, int p_delay_updates);
 	void _poll_retired_textures();
@@ -73,9 +76,11 @@ private:
 	godot::Callable texture_ready_callback;
 	godot::Callable probe_failed_callback;
 	mpv_render_context *render_context = nullptr;
+	VkPhysicalDeviceFeatures2 imported_features{};
+	VkPhysicalDeviceTimelineSemaphoreFeatures imported_timeline{};
+	VkPhysicalDeviceHostQueryResetFeatures imported_query{};
 	std::atomic_bool frame_dirty = false;
 	std::atomic_bool render_request_in_flight = false;
-	std::atomic_int update_callback_count = 0;
 	std::atomic_int last_render_result = 0;
 	std::atomic_int last_rendered_slot = -1;
 	std::shared_ptr<int> render_callback_lifetime;
@@ -83,6 +88,7 @@ private:
 	bool texture_request_logged = false;
 	bool texture_ready_logged = false;
 	bool render_context_logged = false;
+	bool render_context_attempted = false;
 	int published_slot_index = -1;
 	int render_slot_index = -1;
 	int requested_width = 0;
