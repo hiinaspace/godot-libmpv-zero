@@ -1,0 +1,32 @@
+--- a/video/out/vulkan/libmpv_vk.c
++++ b/video/out/vulkan/libmpv_vk.c
+@@ -169,7 +169,6 @@
+   if (!p->wrapped_pltex)
+     return;
+ 
+-  pl_gpu_finish(p->vulkan->gpu);
+   p->handoff_sem.value += 1;
+   p->held_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+   if (!pl_vulkan_hold_ex(
+@@ -182,6 +181,10 @@
+   } else {
+     p->image_released = false;
+   }
++  // hold_ex submits the final layout transition and semaphore signal. The
++  // current API returns no semaphore to the caller, so finish AFTER hold_ex
++  // before allowing the caller to sample the image.
++  pl_gpu_finish(p->vulkan->gpu);
+ }
+ 
+ static void destroy(struct libmpv_gpu_context *ctx) {
+@@ -189,6 +192,10 @@
+ 
+   if (p->wrapped_pltex)
+     pl_tex_destroy(p->vulkan->gpu, &p->wrapped_pltex);
++
++  // Texture destruction can submit work which still references handoff_sem.
++  if (p->vulkan)
++    pl_gpu_finish(p->vulkan->gpu);
+ 
+   if (p->handoff_sem.sem)
+     pl_vulkan_sem_destroy(p->vulkan->gpu, &p->handoff_sem.sem);

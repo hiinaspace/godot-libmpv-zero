@@ -14,10 +14,18 @@
       system = "x86_64-linux";
       pkgs = import nixpkgs { inherit system; };
       godot = import ./nix/godot-official.nix { inherit pkgs; };
-      mpv = pkgs.mpv-unwrapped.overrideAttrs (old: {
+      libplacebo = pkgs.libplacebo.overrideAttrs (old: {
+        patches = (old.patches or [ ]) ++ [
+          ./patches/libplacebo/0001-lower-empty-synchronization-scopes.patch
+        ];
+      });
+      mpv = (pkgs.mpv-unwrapped.override { inherit libplacebo; }).overrideAttrs (old: {
         pname = "libmpv-godot";
         version = "0.41.0-godot-970250ad";
         src = mpv-src;
+        patches = (old.patches or [ ]) ++ [
+          ./patches/mpv/0001-finish-vulkan-handoff-before-return.patch
+        ];
         doInstallCheck = false; # The fork reports its upstream version.
         postInstall = old.postInstall + ''
           cp ../include/mpv/godot_audio.h ../include/mpv/render_vk.h "$dev/include/mpv/"
