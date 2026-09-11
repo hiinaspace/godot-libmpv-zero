@@ -13,6 +13,7 @@
     let
       system = "x86_64-linux";
       pkgs = import nixpkgs { inherit system; };
+      godot = import ./nix/godot-official.nix { inherit pkgs; };
       mpv = pkgs.mpv-unwrapped.overrideAttrs (old: {
         pname = "libmpv-godot";
         version = "0.41.0-godot-970250ad";
@@ -23,13 +24,13 @@
         '';
       });
     in {
-      packages.${system}.mpv = mpv;
+      packages.${system} = { inherit mpv godot; };
       devShells.${system}.default = pkgs.mkShell {
         packages = with pkgs; [
-          cmake ninja pkg-config python3 scons patchelf binutils
+          cmake ninja pkg-config python3 scons patchelf binutils gdb
           vulkan-headers vulkan-loader vulkan-tools vulkan-validation-layers
           ffmpeg yt-dlp deno libpulseaudio
-        ];
+        ] ++ [ godot ];
         buildInputs = [ mpv pkgs.stdenv.cc.cc.lib ];
         MPV_DIR = "${mpv.dev}";
         LIBMPV_ZERO_MPV_LIBRARY = "${mpv}/lib/libmpv.so.2";
