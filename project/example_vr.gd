@@ -9,6 +9,7 @@ const SEEK_STEP := 5.0
 @onready var _xr_origin: XROrigin3D = $XROrigin3D
 @onready var _xr_camera: XRCamera3D = $XROrigin3D/XRCamera3D
 @onready var _emissive_screen: MeshInstance3D = $EmissiveScreen
+@onready var _screen_light: AreaLight3D = $EmissiveScreen/AreaLight3D
 @onready var _left_audio_player: Node = $EmissiveScreen/LeftSpeaker
 @onready var _right_audio_player: Node = $EmissiveScreen/RightSpeaker
 @onready var _player: MPVPlayer = $MPVPlayer
@@ -115,17 +116,20 @@ func _configure_screen_material() -> void:
 		material = material.duplicate() as StandardMaterial3D
 	else:
 		material = StandardMaterial3D.new()
-		material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		material.cull_mode = BaseMaterial3D.CULL_DISABLED
-		material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
-		material.emission_enabled = true
-		material.emission = Color(1.0, 1.0, 1.0, 1.0)
-		material.emission_energy_multiplier = 7.0
 
-	material.albedo_texture_force_srgb = true
+	# The display emits the video; it must not receive its coplanar LTC light.
+	# Apply this to authored materials too, not just the fallback material.
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	# Forward+ unshaded materials output ALBEDO and ignore EMISSION. The
+	# Texture2DRD sRGB view already decodes the source; do not decode it twice.
+	material.albedo_color = Color.WHITE
+	material.albedo_texture_force_srgb = false
 	material.albedo_texture = _player.output_texture
-	material.emission_texture = _player.output_texture
+	material.emission_enabled = false
+	material.emission_texture = null
 	_emissive_screen.set_surface_override_material(0, material)
+	_screen_light.area_texture = _player.output_texture
 
 
 func _configure_player() -> void:
@@ -148,6 +152,7 @@ func _on_video_size_changed(width: int, height: int) -> void:
 		var quad := _emissive_screen.mesh as QuadMesh
 		var aspect := float(width) / float(height)
 		quad.size = Vector2(_screen_base_height * aspect, _screen_base_height)
+		_screen_light.area_size = quad.size
 
 
 func _on_file_loaded() -> void:

@@ -21,7 +21,6 @@ func wait_for(condition: Callable, seconds: float = 8.0) -> bool:
 
 func _run() -> void:
 	var scene: Node = load("res://example_vr.tscn").instantiate()
-	scene.get_node("ReflectionProbe").free() # Independent engine texture leak.
 	root.add_child(scene)
 	player = scene.get_node("MPVPlayer")
 	player.playback_error.connect(func(message: String): errors.append(message))

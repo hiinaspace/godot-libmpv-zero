@@ -50,12 +50,8 @@ add_uv2 = true
 size = Vector2(3.555, 2)
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_daip5"]
+shading_mode = 0
 albedo_texture = ExtResource("3_k1670")
-albedo_texture_force_srgb = true
-emission_enabled = true
-emission = Color(1, 1, 1, 1)
-emission_operator = 1
-emission_texture = ExtResource("3_k1670")
 
 [sub_resource type="BoxMesh" id="BoxMesh_sbaep"]
 size = Vector3(2.3688965, 1, 1)
@@ -135,11 +131,6 @@ transform = Transform3D(1.244524, 0, 0, 0, 1.244524, 0, 0, 0, 1.244524, 0, 0.456
 gi_mode = 2
 mesh = SubResource("CapsuleMesh_k1670")
 surface_material_override/0 = SubResource("StandardMaterial3D_n5d2f")
-
-[node name="ReflectionProbe" type="ReflectionProbe" parent="." unique_id=559318361]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.2066015, 1.4569092)
-size = Vector3(10, 4, 7.0861816)
-box_projection = true
 
 [node name="EmissiveScreen" type="MeshInstance3D" parent="." unique_id=663246320]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.1457692, -2)

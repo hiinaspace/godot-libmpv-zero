@@ -6,9 +6,6 @@ func _initialize() -> void:
 
 func _run() -> void:
 	var scene: Node = load("res://example_vr.tscn").instantiate()
-	# Godot 4.7's ReflectionProbe leaks seven RD textures even with MPVPlayer
-	# removed. Keep that independent engine issue out of the player lifetime test.
-	scene.get_node("ReflectionProbe").free()
 	root.add_child(scene)
 	var player: MPVPlayer = scene.get_node("MPVPlayer")
 	var failed := false

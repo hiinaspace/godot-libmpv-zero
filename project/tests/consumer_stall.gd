@@ -5,7 +5,6 @@ extends "res://tests/transport.gd"
 # bounded queue and resumes without replaying an ever-growing backlog.
 func _run() -> void:
 	var scene: Node = load("res://example_vr.tscn").instantiate()
-	scene.get_node("ReflectionProbe").free()
 	root.add_child(scene)
 	player = scene.get_node("MPVPlayer")
 	player.playback_error.connect(func(message: String): errors.append(message))
