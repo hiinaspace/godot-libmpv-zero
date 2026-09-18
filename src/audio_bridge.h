@@ -34,7 +34,9 @@ public:
 
 	void reset(); // Only after mpv has stopped/joined its AO.
 	void set_output_latency(double p_seconds);
+	void set_targets_updating(bool p_updating);
 	void set_channel_playing(int p_channel, uint64_t p_generation, bool p_playing);
+	int pull_stereo_frames(uint64_t p_generation, godot::AudioFrame *p_buffer, int p_frames);
 	int pull_channel_frames(int p_channel, uint64_t p_generation, godot::AudioFrame *p_buffer, int p_frames);
 	bool consume_configuration_changed();
 	int get_audio_channel_count() const;
@@ -67,12 +69,14 @@ private:
 
 	mutable std::mutex mutex;
 	std::vector<ChannelState> channels;
+	godot::Ref<godot::ChannelAudioStream> stereo_stream;
 	int sample_rate = 48000;
 	int capacity = 0;
 	uint64_t generation = 0;
 	bool configuration_changed = false;
 	int underrun_count = 0;
 	bool sink_playing = false;
+	bool targets_updating = false;
 	double output_latency = 0;
 };
 

@@ -1,0 +1,86 @@
+--- a/src/player.cpp
++++ b/src/player.cpp
+@@ -10,6 +10,9 @@
+ #include "stream.hpp"
+ 
+ void SteamAudioPlayer::_bind_methods() {
++	ClassDB::bind_method(D_METHOD("is_point_source_binaural"), &SteamAudioPlayer::is_point_source_binaural);
++	ClassDB::bind_method(D_METHOD("set_point_source_binaural", "enabled"), &SteamAudioPlayer::set_point_source_binaural);
++	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "point_source_binaural"), "set_point_source_binaural", "is_point_source_binaural");
+ 	ClassDB::bind_method(D_METHOD("play_stream", "stream", "from_offset", "volume_db", "pitch_scale"), &SteamAudioPlayer::play_stream, DEFVAL(0), DEFVAL(0), DEFVAL(1.0));
+ 	ClassDB::bind_method(D_METHOD("get_inner_stream"), &SteamAudioPlayer::get_inner_stream);
+ 	ClassDB::bind_method(D_METHOD("get_inner_stream_playback"), &SteamAudioPlayer::get_inner_stream_playback);
+@@ -123,6 +126,7 @@
+ 	iplSourceRemove(local_state.src.src, gs->sim);
+ 	iplSourceRelease(&local_state.src.src);
+ 	iplDirectEffectRelease(&local_state.fx.direct);
++	iplBinauralEffectRelease(&local_state.fx.binaural);
+ 	iplReflectionEffectRelease(&local_state.fx.refl);
+ 	iplAmbisonicsDecodeEffectRelease(&local_state.fx.dec);
+ 	iplAmbisonicsDecodeEffectRelease(&local_state.fx.refl_dec);
+@@ -165,6 +169,10 @@
+ 	IPLDirectEffectSettings dir_effect_cfg;
+ 	dir_effect_cfg.numChannels = 2;
+ 	handleErr(iplDirectEffectCreate(gs->ctx, &gs->audio_cfg, &dir_effect_cfg, &local_state.fx.direct));
++
++	IPLBinauralEffectSettings binaural_cfg{};
++	binaural_cfg.hrtf = gs->hrtf;
++	handleErr(iplBinauralEffectCreate(gs->ctx, &gs->audio_cfg, &binaural_cfg, &local_state.fx.binaural));
+ 
+ 	IPLReflectionEffectSettings refl_effect_cfg{};
+ 	refl_effect_cfg.type = IPL_REFLECTIONEFFECTTYPE_CONVOLUTION;
+@@ -377,3 +385,6 @@
+ 	PackedStringArray res;
+ 	return res;
+ }
++
++bool SteamAudioPlayer::is_point_source_binaural() { return cfg.point_source_binaural; }
++void SteamAudioPlayer::set_point_source_binaural(bool enabled) { cfg.point_source_binaural = enabled; cfg_dirty.store(true); }
+--- a/src/player.hpp
++++ b/src/player.hpp
+@@ -107,6 +107,8 @@
+ 	void set_dipole_power(float p_dipole_power);
+ 
+ 	bool is_ambisonics_on();
++	bool is_point_source_binaural();
++	void set_point_source_binaural(bool enabled);
+ 	void set_ambisonics_on(bool p_ambisonics_on);
+ 
+ 	void play_stream(const Ref<AudioStream> &p_stream, float p_from_offset, float p_volume_db, float p_pitch_scale);
+--- a/src/steam_audio.hpp
++++ b/src/steam_audio.hpp
+@@ -63,10 +63,12 @@
+ 	bool is_directivity_on;
+ 	float dipole_weight;
+ 	float dipole_power;
++	bool point_source_binaural = false;
+ };
+ 
+ struct SteamAudioEffects {
+ 	IPLDirectEffect direct;
++	IPLBinauralEffect binaural;
+ 	IPLReflectionEffect refl;
+ 	IPLAmbisonicsDecodeEffect dec;
+ 	IPLAmbisonicsDecodeEffect refl_dec;
+--- a/src/stream.cpp
++++ b/src/stream.cpp
+@@ -151,7 +151,18 @@
+ 	dec_params.hrtf = gs->hrtf;
+ 	dec_params.binaural = IPL_TRUE;
+ 
+-	if (ls->cfg.is_ambisonics_on) {
++	if (ls->cfg.point_source_binaural) {
++		// Point sources do not need a low-order Ambisonics encode/decode round trip.
++		IPLBinauralEffectParams params{};
++		params.direction = iplCalculateRelativeDirection(gs->ctx,
++				ipl_vec3_from(ls->dir_to_listener), IPLVector3{0, 0, 0},
++				gs->listener_coords.ahead, gs->listener_coords.up);
++		params.interpolation = IPL_HRTFINTERPOLATION_BILINEAR;
++		params.spatialBlend = 1.0f;
++		params.hrtf = gs->hrtf;
++		iplAudioBufferDownmix(gs->ctx, &ls->bufs.direct, &ls->bufs.mono);
++		iplBinauralEffectApply(ls->fx.binaural, &params, &ls->bufs.mono, &ls->bufs.out);
++	} else if (ls->cfg.is_ambisonics_on) {
+ 		IPLAmbisonicsEncodeEffectParams enc_params{};
+ 		enc_params.direction = ipl_vec3_from(ls->dir_to_listener);
+ 		enc_params.order = ls->cfg.ambisonics_order;

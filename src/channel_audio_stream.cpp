@@ -55,11 +55,11 @@ int32_t ChannelAudioStreamPlayback::_mix_resampled(AudioFrame *p_buffer, int32_t
 		p_buffer[frame_index].right = 0.0f;
 	}
 
-	if (!is_active.load() || bridge == nullptr || channel_index < 0) {
+	if (!is_active.load() || bridge == nullptr || channel_index == -1) {
 		return p_frames;
 	}
 
-	return bridge->pull_channel_frames(channel_index, generation, p_buffer, p_frames);
+	return channel_index == -2 ? bridge->pull_stereo_frames(generation, p_buffer, p_frames) : bridge->pull_channel_frames(channel_index, generation, p_buffer, p_frames);
 }
 
 float ChannelAudioStreamPlayback::_get_stream_sampling_rate() const {
@@ -71,14 +71,14 @@ float ChannelAudioStreamPlayback::_get_stream_sampling_rate() const {
 }
 
 void ChannelAudioStreamPlayback::_start(double /*p_from_pos*/) {
-	if (!is_active.exchange(true) && bridge != nullptr && channel_index >= 0) {
+	if (!is_active.exchange(true) && bridge != nullptr && channel_index != -1) {
 		bridge->set_channel_playing(channel_index, generation, true);
 	}
 	begin_resample();
 }
 
 void ChannelAudioStreamPlayback::_stop() {
-	if (is_active.exchange(false) && bridge != nullptr && channel_index >= 0) {
+	if (is_active.exchange(false) && bridge != nullptr && channel_index != -1) {
 		bridge->set_channel_playing(channel_index, generation, false);
 	}
 }

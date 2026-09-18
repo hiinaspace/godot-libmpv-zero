@@ -20,9 +20,12 @@ namespace {
 
 using Clock = std::chrono::steady_clock;
 
-enum ObservedProperty : uint64_t { TIME_POS = 1, DURATION, WIDTH, HEIGHT, PAUSED, EOF_REACHED, BUFFERING, SPEED };
+enum ObservedProperty : uint64_t { TIME_POS = 1, DURATION, WIDTH, HEIGHT, PAUSED, EOF_REACHED, BUFFERING, SPEED, TRACKS, SUBTITLE, SEEKABLE, PARTIALLY_SEEKABLE };
 struct PropertyObservation { ObservedProperty id; const char *name; mpv_format format; };
 constexpr PropertyObservation observed_properties[] = {
+	{SEEKABLE, "seekable", MPV_FORMAT_FLAG},
+	{PARTIALLY_SEEKABLE, "partially-seekable", MPV_FORMAT_FLAG},
+	{TRACKS, "track-list", MPV_FORMAT_NODE}, {SUBTITLE, "sid", MPV_FORMAT_NODE},
 	{TIME_POS, "time-pos", MPV_FORMAT_DOUBLE}, {DURATION, "duration", MPV_FORMAT_DOUBLE},
 	{WIDTH, "width", MPV_FORMAT_INT64}, {HEIGHT, "height", MPV_FORMAT_INT64},
 	{BUFFERING, "paused-for-cache", MPV_FORMAT_FLAG}, {SPEED, "speed", MPV_FORMAT_DOUBLE},
@@ -191,6 +194,7 @@ bool MpvCore::initialize() {
 	dispatch.set_option_string(handle, "terminal", is_load_trace_enabled() ? "yes" : "no");
 	dispatch.set_option_string(handle, "msg-level", is_load_trace_enabled() ? "all=v" : "all=warn");
 	dispatch.set_option_string(handle, "idle", "yes");
+	dispatch.set_option_string(handle, "rtsp-transport", "tcp");
 	dispatch.set_option_string(handle, "keep-open", "yes");
 	const char *video_output_name = video_output_mode == VideoOutputMode::LIBMPV ? "libmpv" : "null";
 	dispatch.set_option_string(handle, "vo", video_output_name);
@@ -259,6 +263,8 @@ void MpvCore::shutdown() {
 	loaded_path = "";
 	time_pos = 0.0;
 	duration = 0.0;
+	seekable = false;
+	partially_seekable = false;
 	video_width = 0;
 	video_height = 0;
 	if (get_dispatch_ref_count() == 0) {
@@ -273,9 +279,15 @@ void MpvCore::load_file(const String &p_path) {
 		return;
 	}
 
+	subtitle_tracks.clear();
+	subtitle_track = -1;
+	const char *subtitle_auto[] = { "set", "sid", "auto", nullptr };
+	get_dispatch().command_async(handle, 0, subtitle_auto);
 	loaded_path = p_path;
 	time_pos = 0.0;
 	duration = 0.0;
+	seekable = false;
+	partially_seekable = false;
 	video_width = 0;
 	video_height = 0;
 	playback_state = PlaybackState::STOPPED;
@@ -360,6 +372,20 @@ bool MpvCore::set_speed(double p_speed) {
 	return get_dispatch().set_property_async(handle, 0, "speed", MPV_FORMAT_DOUBLE, &p_speed) >= 0;
 }
 
+bool MpvCore::set_subtitle_track(int64_t p_id) {
+	if (!initialized || !file_loaded) return false;
+	bool found = p_id == -1;
+	for (int i = 0; i < subtitle_tracks.size(); ++i) {
+		Dictionary track = subtitle_tracks[i];
+		found |= int64_t(track["id"]) == p_id;
+	}
+	if (!found) return false;
+	String value = p_id == -1 ? String("no") : String::num_int64(p_id);
+	CharString utf8 = value.utf8();
+	const char *command[] = { "set", "sid", utf8.get_data(), nullptr };
+	return get_dispatch().command_async(handle, 0, command) >= 0;
+}
+
 void MpvCore::seek(double p_seconds) {
 	if (!std::isfinite(p_seconds)) return;
 	if (!initialized) {
@@ -407,6 +433,32 @@ MpvCore::PollResult MpvCore::poll() {
 				const auto *property = static_cast<const mpv_event_property *>(event->data);
 				if (!property || !property->data) break;
 				switch (event->reply_userdata) {
+					case TRACKS: {
+						subtitle_tracks.clear();
+						const auto *node = static_cast<const mpv_node *>(property->data);
+						if (property->format == MPV_FORMAT_NODE && node->format == MPV_FORMAT_NODE_ARRAY) {
+							for (int i = 0; i < node->u.list->num; ++i) {
+								const auto &entry = node->u.list->values[i];
+								if (entry.format != MPV_FORMAT_NODE_MAP) continue;
+								Dictionary track;
+								for (int j = 0; j < entry.u.list->num; ++j) {
+									String key(entry.u.list->keys[j]);
+									const auto &v = entry.u.list->values[j];
+									if (key == "id" && v.format == MPV_FORMAT_INT64) track[key] = v.u.int64;
+									if ((key == "type" || key == "lang" || key == "title") && v.format == MPV_FORMAT_STRING) track[key] = String::utf8(v.u.string);
+								}
+								if (track.get("type", "") == Variant("sub") && track.has("id")) subtitle_tracks.append(track);
+							}
+						}
+						result.tracks_changed = true;
+						break;
+					}
+					case SUBTITLE: {
+						const auto *node = static_cast<const mpv_node *>(property->data);
+						subtitle_track = property->format == MPV_FORMAT_NODE && node->format == MPV_FORMAT_INT64 ? node->u.int64 : -1;
+						result.tracks_changed = true;
+						break;
+					}
 					case TIME_POS:
 						if (property->format == MPV_FORMAT_DOUBLE) {
 							const double value = *static_cast<double *>(property->data);
@@ -425,6 +477,12 @@ MpvCore::PollResult MpvCore::poll() {
 							result.video_reconfigured |= size != value;
 							size = value;
 						}
+						break;
+					case PARTIALLY_SEEKABLE:
+						if (property->format == MPV_FORMAT_FLAG) partially_seekable = *static_cast<int *>(property->data) != 0;
+						break;
+					case SEEKABLE:
+						if (property->format == MPV_FORMAT_FLAG) seekable = *static_cast<int *>(property->data) != 0;
 						break;
 					case BUFFERING:
 						if (property->format == MPV_FORMAT_FLAG) buffering = *static_cast<int *>(property->data) != 0;
@@ -466,6 +524,9 @@ MpvCore::PollResult MpvCore::poll() {
 				}
 				break;
 			case MPV_EVENT_START_FILE:
+				subtitle_tracks.clear();
+				subtitle_track = -1;
+				result.tracks_changed = true;
 				loading = true;
 				status = "starting file";
 				trace_load_log("event start_file");
@@ -480,6 +541,9 @@ MpvCore::PollResult MpvCore::poll() {
 				result.file_loaded = true;
 				break;
 			case MPV_EVENT_END_FILE: {
+				subtitle_tracks.clear();
+				subtitle_track = -1;
+				result.tracks_changed = true;
 				const mpv_event_end_file *end_file = static_cast<const mpv_event_end_file *>(event->data);
 				const bool ended_at_eof = end_file && end_file->reason == MPV_END_FILE_REASON_EOF;
 				playback_state = PlaybackState::STOPPED;

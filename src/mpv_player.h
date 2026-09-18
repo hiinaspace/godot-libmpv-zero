@@ -58,6 +58,8 @@ private:
 	int last_video_height = 0;
 	NodePath left_audio_target_path;
 	NodePath right_audio_target_path;
+	NodePath stereo_audio_target_path;
+	bool direct_stereo = false;
 
 public:
 	MPVPlayer();
@@ -77,6 +79,12 @@ public:
 	NodePath get_left_audio_target() const;
 	void set_right_audio_target(const NodePath &p_path);
 	NodePath get_right_audio_target() const;
+	void set_direct_stereo(bool p_enabled);
+	bool is_direct_stereo() const { return direct_stereo; }
+	void set_stereo_audio_target(const NodePath &p_path);
+	Array get_subtitle_tracks() const;
+	int64_t get_subtitle_track() const;
+	bool set_subtitle_track(int64_t p_id);
 	void set_paused(bool p_paused);
 	bool is_paused() const;
 	void load(const String &p_source);

@@ -13,6 +13,7 @@ const mpv_godot_audio_sink AudioBridge::sink = {
 };
 
 void AudioBridge::clear_locked() {
+	stereo_stream.unref();
 	++generation;
 	sink_playing = false;
 	underrun_count = 0;
@@ -65,6 +66,11 @@ void AudioBridge::play_sink(void *p_ctx, int p_playing) {
 	bridge.sink_playing = p_playing != 0;
 }
 
+void AudioBridge::set_targets_updating(bool p_updating) {
+	std::lock_guard<std::mutex> lock(mutex);
+	targets_updating = p_updating;
+}
+
 void AudioBridge::set_output_latency(double p_seconds) {
 	std::lock_guard<std::mutex> lock(mutex);
 	output_latency = std::isfinite(p_seconds) ? std::max(0.0, p_seconds) : 0.0;
@@ -72,7 +78,20 @@ void AudioBridge::set_output_latency(double p_seconds) {
 
 void AudioBridge::set_channel_playing(int p_channel, uint64_t p_generation, bool p_playing) {
 	std::lock_guard<std::mutex> lock(mutex);
-	if (p_generation != generation || p_channel < 0 || p_channel >= int(channels.size())) {
+	if (p_generation != generation) return;
+	if (p_channel == -2) {
+		int queued = capacity;
+		for (const auto &channel : channels) queued = std::min(queued, channel.queued);
+		for (auto &channel : channels) {
+			if (p_playing) {
+				channel.read_index = (channel.read_index + channel.queued - queued) % capacity;
+				channel.queued = queued;
+				++channel.consumers;
+			} else channel.consumers = std::max(0, channel.consumers - 1);
+		}
+		return;
+	}
+	if (p_channel < 0 || p_channel >= int(channels.size())) {
 		return;
 	}
 	ChannelState &channel = channels[p_channel];
@@ -153,7 +172,7 @@ int AudioBridge::pull_channel_frames(int p_channel, uint64_t p_generation, Audio
 	ChannelState &channel = channels[p_channel];
 	++channel.pull_calls;
 	channel.pulled_frames += p_frames;
-	if (!sink_playing) {
+	if (!sink_playing || targets_updating) {
 		return p_frames;
 	}
 	const int count = std::min(p_frames, channel.queued);
@@ -174,6 +193,30 @@ int AudioBridge::pull_channel_frames(int p_channel, uint64_t p_generation, Audio
 	if (count < p_frames) {
 		++underrun_count; // Includes normal drain at EOF; the AO distinguishes it.
 	}
+	return p_frames;
+}
+
+int AudioBridge::pull_stereo_frames(uint64_t p_generation, AudioFrame *p_buffer, int p_frames) {
+	std::fill_n(p_buffer, p_frames, AudioFrame{});
+	std::lock_guard<std::mutex> lock(mutex);
+	if (p_generation != generation || channels.empty() || !sink_playing || targets_updating) return p_frames;
+	int count = p_frames;
+	for (const auto &channel : channels) count = std::min(count, channel.queued);
+	for (int i = 0; i < count; ++i) {
+		p_buffer[i].left = channels[0].samples[(channels[0].read_index + i) % capacity];
+		auto &right = channels[channels.size() > 1 ? 1 : 0];
+		p_buffer[i].right = right.samples[(right.read_index + i) % capacity];
+	}
+	for (auto &channel : channels) {
+		++channel.pull_calls;
+		channel.pulled_frames += p_frames;
+		channel.read_index = (channel.read_index + count) % capacity;
+		channel.queued -= count;
+		channel.consumed_frames += count;
+		if (count > 0) channel.output_end = Clock::now() + std::chrono::duration_cast<Clock::duration>(
+			std::chrono::duration<double>(output_latency + double(count) / sample_rate));
+	}
+	if (count < p_frames) ++underrun_count;
 	return p_frames;
 }
 
@@ -217,6 +260,13 @@ int AudioBridge::get_audio_channel_count() const {
 
 Ref<AudioStream> AudioBridge::get_audio_stream_for_channel(int p_channel) {
 	std::lock_guard<std::mutex> lock(mutex);
+	if (p_channel == -2 && !channels.empty()) {
+		if (stereo_stream.is_null()) {
+			stereo_stream.instantiate();
+			stereo_stream->configure(weak_from_this(), -2, generation);
+		}
+		return stereo_stream;
+	}
 	if (p_channel < 0 || p_channel >= int(channels.size())) {
 		return {};
 	}

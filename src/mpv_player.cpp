@@ -52,6 +52,13 @@ MPVPlayer::MPVPlayer() :
 MPVPlayer::~MPVPlayer() = default;
 
 void MPVPlayer::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("set_direct_stereo", "enabled"), &MPVPlayer::set_direct_stereo);
+	ClassDB::bind_method(D_METHOD("is_direct_stereo"), &MPVPlayer::is_direct_stereo);
+	ClassDB::bind_method(D_METHOD("set_stereo_audio_target", "path"), &MPVPlayer::set_stereo_audio_target);
+	ClassDB::bind_method(D_METHOD("get_subtitle_tracks"), &MPVPlayer::get_subtitle_tracks);
+	ClassDB::bind_method(D_METHOD("get_subtitle_track"), &MPVPlayer::get_subtitle_track);
+	ClassDB::bind_method(D_METHOD("set_subtitle_track", "id"), &MPVPlayer::set_subtitle_track);
+	ADD_SIGNAL(MethodInfo("subtitle_tracks_changed"));
 	ClassDB::bind_method(D_METHOD("set_playback_speed", "speed"), &MPVPlayer::set_playback_speed);
 	ClassDB::bind_method(D_METHOD("get_playback_state"), &MPVPlayer::get_playback_state);
 	ClassDB::bind_method(D_METHOD("set_source", "source"), &MPVPlayer::set_source);
@@ -260,6 +267,8 @@ Dictionary MPVPlayer::get_playback_state() const {
 	Dictionary state;
 	state["position"] = get_playback_position();
 	state["duration"] = get_duration();
+	state["seekable"] = mpv_core && mpv_core->is_seekable();
+	state["partially_seekable"] = mpv_core && mpv_core->is_partially_seekable();
 	state["paused"] = is_paused();
 	state["playing"] = is_playing();
 	state["loading"] = !mpv_core || mpv_core->is_loading();
@@ -528,6 +537,7 @@ void MPVPlayer::_sync_mpv_state() {
 		}
 	}
 
+	if (poll_result.tracks_changed) emit_signal("subtitle_tracks_changed");
 	if (poll_result.failed) {
 		UtilityFunctions::push_warning("MPVPlayer: " + poll_result.status);
 		emit_signal("playback_error", poll_result.status);
@@ -613,6 +623,27 @@ Node *MPVPlayer::_resolve_target(const NodePath &p_path) const {
 	return get_node_or_null(p_path);
 }
 
+void MPVPlayer::set_direct_stereo(bool p_enabled) {
+	if (direct_stereo == p_enabled) return;
+	AudioServer::get_singleton()->lock();
+	_stop_audio_target(_resolve_target(left_audio_target_path));
+	_stop_audio_target(_resolve_target(right_audio_target_path));
+	_stop_audio_target(_resolve_target(stereo_audio_target_path));
+	direct_stereo = p_enabled;
+	_sync_audio_targets();
+	AudioServer::get_singleton()->unlock();
+}
+
+void MPVPlayer::set_stereo_audio_target(const NodePath &p_path) {
+	_stop_audio_target(_resolve_target(stereo_audio_target_path));
+	stereo_audio_target_path = p_path;
+	_sync_audio_targets();
+}
+
+Array MPVPlayer::get_subtitle_tracks() const { return mpv_core->get_subtitle_tracks(); }
+int64_t MPVPlayer::get_subtitle_track() const { return mpv_core->get_subtitle_track(); }
+bool MPVPlayer::set_subtitle_track(int64_t p_id) { return mpv_core->set_subtitle_track(p_id); }
+
 void MPVPlayer::_sync_audio_targets() {
 	if (!is_inside_tree()) {
 		return;
@@ -621,8 +652,16 @@ void MPVPlayer::_sync_audio_targets() {
 	// Replace/unpause the two speaker playbacks as one mixer transaction.
 	AudioServer *audio_server = AudioServer::get_singleton();
 	audio_server->lock();
-	_configure_audio_target(_resolve_target(left_audio_target_path), 0);
-	_configure_audio_target(_resolve_target(right_audio_target_path), 1);
+	// begin_resample() pulls input during start(). Give both new channels the
+	// same silent prefill, even if mpv writes between their initializations.
+	if (audio_bridge) audio_bridge->set_targets_updating(true);
+	if (direct_stereo) {
+		_configure_audio_target(_resolve_target(stereo_audio_target_path), -2);
+	} else {
+		_configure_audio_target(_resolve_target(left_audio_target_path), 0);
+		_configure_audio_target(_resolve_target(right_audio_target_path), 1);
+	}
+	if (audio_bridge) audio_bridge->set_targets_updating(false);
 	audio_server->unlock();
 }
 
@@ -632,7 +671,7 @@ void MPVPlayer::_configure_audio_target(Node *p_target, int p_channel_index) {
 	}
 
 	const int channel_count = audio_bridge ? audio_bridge->get_audio_channel_count() : 0;
-	if (p_channel_index < 0 || p_channel_index >= channel_count) {
+	if (channel_count == 0 || p_channel_index == -1 || p_channel_index >= channel_count) {
 		_set_audio_target_stream(p_target, Ref<AudioStream>(), false);
 		_stop_audio_target(p_target);
 		return;
