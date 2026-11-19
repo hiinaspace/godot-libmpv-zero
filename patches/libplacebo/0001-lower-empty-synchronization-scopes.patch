@@ -1,6 +1,6 @@
 --- a/src/vulkan/command.c
 +++ b/src/vulkan/command.c
-@@ -176,7 +176,7 @@
+@@ -181,7 +181,7 @@
      return flags;
  }
  
@@ -9,7 +9,7 @@
  {
      VkPipelineStageFlags flags = flags2 & VK_PIPELINE_STAGE_FLAG_BITS_MAX_ENUM;
      SET(VK_PIPELINE_STAGE_TRANSFER_BIT,     VK_PIPELINE_STAGE_2_COPY_BIT |
-@@ -185,7 +185,10 @@
+@@ -190,7 +190,10 @@
                                              VK_PIPELINE_STAGE_2_CLEAR_BIT);
      SET(VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, VK_PIPELINE_STAGE_2_INDEX_INPUT_BIT |
                                              VK_PIPELINE_STAGE_2_VERTEX_ATTRIBUTE_INPUT_BIT);
@@ -21,7 +21,7 @@
  }
  
  #undef SET
-@@ -217,8 +220,8 @@
+@@ -222,8 +225,8 @@
              .size                = barr2->size,
          };
  
@@ -32,7 +32,7 @@
                                 info->dependencyFlags,
                                 0, NULL, 1, &barr, 0, NULL);
  
-@@ -238,8 +241,8 @@
+@@ -243,8 +246,8 @@
              .subresourceRange    = barr2->subresourceRange,
          };
  
@@ -43,3 +43,14 @@
                                 info->dependencyFlags,
                                 0, NULL, 0, NULL, 1, &barr);
      }
+@@ -477,7 +480,9 @@
+ 
+     for (int i = 0; i < num_deps; i++) {
+         deps[i] = info2->pWaitSemaphoreInfos[i].semaphore;
+-        masks[i] = lower_stage2(info2->pWaitSemaphoreInfos[i].stageMask);
++        // An empty wait scope has no legacy equivalent; wait at TOP_OF_PIPE.
++        masks[i] = lower_stage2(info2->pWaitSemaphoreInfos[i].stageMask,
++                                VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT);
+         depvals[i] = info2->pWaitSemaphoreInfos[i].value;
+     }
+     for (int i = 0; i < num_sigs; i++) {

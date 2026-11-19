@@ -3,13 +3,20 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/dc5d91f840324650bac8c379428c7037a416959a";
+    # Newer nixpkgs, used ONLY for its mpv 0.42 and libplacebo 7.387 package
+    # recipes; they are built with the pinned nixpkgs toolchain above so the
+    # libmpv matches the glibc of the patched Godot.
+    nixpkgs-mpv = {
+      url = "github:NixOS/nixpkgs/04906337b6d53e8bb0eaf0470ae9f070a4d4eb55";
+      flake = false;
+    };
     mpv-src = {
-      url = "github:hiinaspace/mpv/970250ad1480e78ca03999e1733d212278f07dbb";
+      url = "github:hiinaspace/mpv/5f4d6211187375568c273262eacb44304ea618b1";
       flake = false;
     };
   };
 
-  outputs = { self, nixpkgs, mpv-src }:
+  outputs = { self, nixpkgs, nixpkgs-mpv, mpv-src }:
     let
       system = "x86_64-linux";
       pkgs = import nixpkgs { inherit system; };
@@ -23,14 +30,18 @@
         ];
         sconsFlags = old.sconsFlags ++ [ "use_static_cpp=false" ];
       });
-      libplacebo = pkgs.libplacebo.overrideAttrs (old: {
+      libplacebo-base = pkgs.callPackage
+        (nixpkgs-mpv + "/pkgs/by-name/li/libplacebo/package.nix") { };
+      libplacebo = libplacebo-base.overrideAttrs (old: {
         patches = (old.patches or [ ]) ++ [
           ./patches/libplacebo/0001-lower-empty-synchronization-scopes.patch
         ];
       });
-      mpv = (pkgs.mpv-unwrapped.override { inherit libplacebo; }).overrideAttrs (old: {
+      mpv-base = pkgs.callPackage
+        (nixpkgs-mpv + "/pkgs/by-name/mp/mpv-unwrapped/package.nix") { inherit libplacebo; };
+      mpv = mpv-base.overrideAttrs (old: {
         pname = "libmpv-godot";
-        version = "0.41.0-godot-970250ad";
+        version = "0.42.0-godot-5f4d6211";
         src = mpv-src;
         patches = (old.patches or [ ]) ++ [
           ./patches/mpv/0001-finish-vulkan-handoff-before-return.patch

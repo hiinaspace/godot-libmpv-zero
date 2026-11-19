@@ -1,4 +1,6 @@
 #include "mpv_core.h"
+
+#include <cstdlib>
 #include "mini_mpv_client.h"
 #include "runtime_library_utils.h"
 
@@ -207,6 +209,14 @@ bool MpvCore::initialize() {
 	// due instead of immediately publishing frames rendered ahead of audio.
 	dispatch.set_option_string(handle, "video-timing-offset", "0");
 	dispatch.set_option_string(handle, "pause", "yes");
+	// Pin decoding explicitly. mpv 0.42 no longer treats Vulkan hardware decode
+	// as safe to auto-select, and the zero-copy render path has only been
+	// verified with software-decoded frames. LIBMPV_ZERO_HWDEC overrides this
+	// for experiments (for example "vulkan" or "auto-safe").
+	{
+		const char *hwdec = std::getenv("LIBMPV_ZERO_HWDEC");
+		dispatch.set_option_string(handle, "hwdec", (hwdec && *hwdec) ? hwdec : "no");
+	}
 
 	if (dispatch.set_godot_audio_sink(handle, audio_sink_user_data, audio_sink) < 0) {
 		dispatch.terminate_destroy(handle);
